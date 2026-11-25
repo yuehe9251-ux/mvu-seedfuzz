@@ -86,11 +86,13 @@ node src/cli.mjs list-ops --preset presets/minimal-rpg.mjs
 node src/cli.mjs gen --preset presets/minimal-rpg.mjs --seed 1001 --k 4
 ```
 
-### 3. 接入 API 跑 10 种子并发盲测并生成热力图
+### 3. 接入 API 跑 10 种子并发盲测并生成热力图（支持长上下文对照）
 ```bash
 node src/cli.mjs run \
   --preset presets/minimal-rpg.mjs \
   --seeds 1001..1010 \
+  --long-seeds 1008..1010 \
+  --context-chars 55000 \
   --k 4 \
   --concurrency 3 \
   --api-url https://api.openai.com/v1/chat/completions \
@@ -99,7 +101,8 @@ node src/cli.mjs run \
   --story-model gemini-2.5-flash \
   --md-out heatmap.md
 ```
-> 同样支持环境变量 `FUZZ_API_URL` / `FUZZ_API_KEY` / `FUZZ_MODEL`，以及 Google Gemini 原生 `generateContent` 接口。
+> - 同样支持环境变量 `FUZZ_API_URL` / `FUZZ_API_KEY` / `FUZZ_MODEL`，以及 Google Gemini 原生 `generateContent` 接口。
+> - **标准组 vs 长上下文组对照**：不带 `--context-chars` 时对应酒馆「**额外模型解析变量**（仅传规则 + `stat_data` + 最新正文）」；开启 `--long-seeds` + `--context-chars 55000` 则会在规则与当前状态之间注入拟真已结算历史前情与旧数值干扰项，对应「**主模型一体直出** / 携带长对话历史」时的抗遗忘与防旧数字串台压测（Antigravity 工作流超 4.2 万字时自动切换多轮分段投喂，零截断）。
 
 ---
 

@@ -78,11 +78,13 @@ npm test
 npm run selftest
 ```
 
-Run a 10-seed blind fuzz sweep against any OpenAI-compatible or Gemini endpoint:
+Run a 10-seed blind fuzz sweep (including optional **Long-Context** distractor stress tests) against any OpenAI-compatible or Gemini endpoint:
 ```bash
 node src/cli.mjs run \
   --preset presets/minimal-rpg.mjs \
   --seeds 1001..1010 \
+  --long-seeds 1008..1010 \
+  --context-chars 55000 \
   --k 4 \
   --concurrency 3 \
   --api-url https://api.openai.com/v1/chat/completions \
@@ -91,6 +93,7 @@ node src/cli.mjs run \
   --story-model gemini-2.5-flash \
   --md-out heatmap.md
 ```
+> **Standard vs Long-Context**: Standard seeds model SillyTavern **Extra-Model variable parsing** (rules + `stat_data` + latest turn only). Adding `--long-seeds` + `--context-chars 55000` injects settled prior-turn RP history packed with numerical distractors between the rules and `stat_data`, benchmarking **Main-Model full-history** rule recall & bleed-through resistance (Antigravity workflow auto-chunks >42k-char prompts into multi-turn sessions for zero truncation). You can override the filler via `preset.buildHistoryFiller(seed, targetChars)`.
 
 ---
 

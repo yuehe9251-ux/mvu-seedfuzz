@@ -254,27 +254,75 @@ export function verifyGeneratedStory(testCase, storyText) {
   };
 }
 
-/** Build blind prompt for AI-B (target model): ONLY real card rules + initial state + story prose. */
+/**
+ * Generate deterministic, realistic prior-turn RP history containing numerical distractors
+ * (old shop prices, old HP damage, old potion uses) explicitly marked as already-settled turns.
+ * Used to benchmark long-context rule recall & resistance to historical-number bleed-through.
+ */
+export function buildRealisticHistoryFiller(seed, targetChars) {
+  const goal = Math.max(0, Number(targetChars || 0));
+  if (goal <= 0) return '';
+  const rng = mulberry32((Number(seed) || 1) ^ 0x9E3779B9);
+  const scenes = [
+    (t, n) => `[Prior Turn ${t} · Market Square Patrol] Earlier in the afternoon, the party passed the bustling square where a street stall advertised iron daggers for ${200 + n * 15} gold and roasted skewers for ${45 + n * 5} gold. Nobody bought anything; all prior expenses and inventory states from that stroll were already settled in the system log before the current turn.`,
+    (t, n) => `[Prior Turn ${t} · Tavern Tactical Debrief] Over a flickering oil lamp at the inn, the team reviewed an old skirmish from two days ago where they had taken ${95 + n * 8} points of glancing damage and drank ${1 + (n % 3)} healing potions—both already fully recovered and recorded in earlier turns. They discussed flank timing and guard cadence before packing up.`,
+    (t, n) => `[Prior Turn ${t} · Outer Ruins Scouting] Damp moss clung to the stone arches as the scouts estimated a distant patrol's aggro radius at ${16 + (n % 14)} meters. Along the road they guided a lost traveler back toward the south gate and politely declined the traveler's offer of ${140 + n * 10} gold and ${2 + (n % 4)} travel rations (pure transition dialogue; no item or currency transfer occurred).`,
+    (t, n) => `[Prior Turn ${t} · Forge & Smithy Banter] Sparks showered from the anvil while the veteran blacksmith shared stories about masterwork tempering and how a shield knight once spent ${850 + n * 25} gold on ore last week. After inspecting their scabbards, the party thanked the smith and walked back down the lantern-lit avenue.`,
+    (t, n) => `[Prior Turn ${t} · Guild Hall Evening Notes] Notices fluttered on the guild board listing fog visibility down to ${25 + (n % 20)} meters along the northern ravine and rumored side passages beyond the tower entrance. Every past errand, ledger entry, and resource change from previous chapters has already been finalized and archived.`,
+  ];
+  const chunks = [];
+  let len = 0;
+  let turn = 1;
+  while (len < goal) {
+    const fn = scenes[Math.floor(rng() * scenes.length) % scenes.length];
+    const line = fn(turn, Math.floor(rng() * 40));
+    chunks.push(line);
+    len += line.length + 2;
+    turn++;
+  }
+  return chunks.join('\n\n');
+}
+
+/** Build blind prompt for AI-B (target model): ONLY real card rules + optional settled history + initial state + story prose. */
 export function buildBlindUpdaterPrompt(preset, testCase, storyText, options = {}) {
   const rules = typeof preset.loadRules === 'function' ? preset.loadRules(options) : '';
   const stateForPrompt = typeof preset.sanitizeStateForPrompt === 'function'
     ? preset.sanitizeStateForPrompt(deepClone(testCase.baseStatData))
     : deepClone(testCase.baseStatData);
 
+  const ctxChars = Math.max(0, Number(options.contextChars ?? options['context-chars'] ?? 0));
+  const historyBody = ctxChars > 0
+    ? (typeof preset.buildHistoryFiller === 'function'
+      ? preset.buildHistoryFiller(testCase.seed, ctxChars)
+      : buildRealisticHistoryFiller(testCase.seed, ctxChars))
+    : '';
+  const historyBlock = historyBody
+    ? [
+      ``,
+      `=== PRIOR SETTLED RP HISTORY (ALREADY FINALIZED — DO NOT RE-APPLY OLD EVENTS OR NUMBERS) ===`,
+      historyBody,
+      `=== END OF PRIOR HISTORY (ONLY EVALUATE THE NEW RP STORY TURN BELOW) ===`,
+    ].join('\n')
+    : '';
+
   return [
     `You are an AI RP / SillyTavern MVU state-update engine.`,
     `Strictly follow the rules below to convert the new RP story turn into precise JSONPatch updates against the current stat_data.`,
     `Output ONLY an <UpdateVariable><JSONPatch>[...]</JSONPatch></UpdateVariable> block (valid JSON array, no story recap).`,
+    ctxChars > 0
+      ? `CRITICAL: Any prior RP history included below has ALREADY been settled. Emit updates ONLY for the final === NEW RP STORY TURN ===.`
+      : null,
     ``,
     `=== VARIABLE UPDATE RULES ===`,
     rules,
+    historyBlock,
     ``,
     `=== CURRENT stat_data ===`,
     JSON.stringify(stateForPrompt),
     ``,
     `=== NEW RP STORY TURN ===`,
     storyText,
-  ].join('\n');
+  ].filter((x) => x !== null).join('\n');
 }
 
 /** Grade AI-B's blind output through the real preset oracle and detect unintended drift. */
@@ -358,6 +406,17 @@ export function buildHeatmapReport(results, meta = {}) {
   const fullPassSeeds = results.filter((r) => r.allPassed).length;
   const hitRatePct = totalOps ? Math.round((totalPass * 1000) / totalOps) / 10 : 0;
 
+  const stdResults = results.filter((r) => !r.isLongContext);
+  const longResults = results.filter((r) => !!r.isLongContext);
+  const formatGroup = (arr) => {
+    if (!arr.length) return '0/0';
+    const passS = arr.filter((r) => r.allPassed).length;
+    const passO = arr.reduce((s, r) => s + Number(r.passedOps || 0), 0);
+    const totO = arr.reduce((s, r) => s + Number(r.totalOps || 0), 0);
+    const pct = totO ? Math.round((passO * 1000) / totO) / 10 : 0;
+    return `seeds **${passS}/${arr.length}**, ops **${passO}/${totO}** (**${pct}%**)`;
+  };
+
   const title = meta.title || 'MVU-SeedFuzz Variable Vulnerability Heatmap';
   const lines = [
     `# ${title}`,
@@ -365,6 +424,9 @@ export function buildHeatmapReport(results, meta = {}) {
     meta.model ? `- Target Model: **${meta.model}**` : null,
     `- Seeds Tested: **${results.length}** (All-Pass Seeds: **${fullPassSeeds}/${results.length}**)`,
     `- Atomic Variable Hit Rate: **${totalPass}/${totalOps}** (**${hitRatePct}%**)`,
+    longResults.length > 0
+      ? `- Context Comparison: Standard (${formatGroup(stdResults)}) | Long-Context (${formatGroup(longResults)})`
+      : null,
     ``,
     `| Domain | Operator ID | Variable Mutation | Pass/Total | Hit Rate | Failing Seeds & Diagnostics |`,
     `| :--- | :--- | :--- | :---: | :---: | :--- |`,

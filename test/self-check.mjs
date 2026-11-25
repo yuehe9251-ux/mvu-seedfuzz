@@ -9,6 +9,7 @@ import {
   extractPatchesFromOutput,
   generateCase,
   verifyGeneratedStory,
+  buildRealisticHistoryFiller,
   buildBlindUpdaterPrompt,
   gradeUpdaterOutput,
   buildHeatmapReport,
@@ -109,6 +110,42 @@ test('custom parseModelOutput + applyUpdate hooks support non-JSONPatch framewor
   const delta = tc.expectedPatches[0].value;
   const g = gradeUpdaterOutput(customPreset, tc, `<MyCustomFormat>HP_DELTA=${delta}</MyCustomFormat>`);
   assert.equal(g.allPassed, true);
+});
+
+test('buildRealisticHistoryFiller is deterministic and meets target length', () => {
+  const a = buildRealisticHistoryFiller(3021, 5000);
+  const b = buildRealisticHistoryFiller(3021, 5000);
+  assert.equal(a, b);
+  assert.ok(a.length >= 5000);
+  assert.equal(buildRealisticHistoryFiller(3021, 0), '');
+});
+
+test('buildBlindUpdaterPrompt injects settled long-context history between rules and stat_data', () => {
+  const tc = generateCase(minimalPreset, 3021, { k: 2 });
+  const story = 'Aria takes a deep breath in the tavern.';
+  const longPrompt = buildBlindUpdaterPrompt(minimalPreset, tc, story, { contextChars: 4000 });
+  const rulesIdx = longPrompt.indexOf('=== VARIABLE UPDATE RULES ===');
+  const histIdx = longPrompt.indexOf('=== PRIOR SETTLED RP HISTORY');
+  const stateIdx = longPrompt.indexOf('=== CURRENT stat_data ===');
+  assert.ok(rulesIdx >= 0 && histIdx > rulesIdx && stateIdx > histIdx);
+  assert.ok(longPrompt.length > 4500);
+  assert.ok(!longPrompt.includes('expectedPatches'));
+
+  const customPreset = { ...minimalPreset, buildHistoryFiller: (seed, chars) => `CUSTOM_HIST_${seed}_${chars}` };
+  const customPrompt = buildBlindUpdaterPrompt(customPreset, tc, story, { contextChars: 1234 });
+  assert.ok(customPrompt.includes('CUSTOM_HIST_3021_1234'));
+});
+
+test('buildHeatmapReport includes Standard vs Long-Context comparison when mixed', () => {
+  const tcStd = generateCase(minimalPreset, 1001, { k: 2 });
+  const tcLng = generateCase(minimalPreset, 1002, { k: 2 });
+  const gStd = gradeUpdaterOutput(minimalPreset, tcStd, `<UpdateVariable><JSONPatch>${JSON.stringify(tcStd.expectedPatches)}</JSONPatch></UpdateVariable>`);
+  gStd.isLongContext = false;
+  const gLng = gradeUpdaterOutput(minimalPreset, tcLng, `<UpdateVariable><JSONPatch>${JSON.stringify(tcLng.expectedPatches)}</JSONPatch></UpdateVariable>`);
+  gLng.isLongContext = true;
+  const rep = buildHeatmapReport([gStd, gLng], { model: 'test-model' });
+  assert.ok(rep.markdown.includes('Context Comparison: Standard'));
+  assert.ok(rep.markdown.includes('Long-Context'));
 });
 
 console.log(`\nAll ${passed} tests passed!`);

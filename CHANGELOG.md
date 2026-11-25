@@ -2,6 +2,20 @@
 
 All notable changes to **MVU-SeedFuzz** will be documented in this file.
 
+## [0.1.2] - 2026-11-26
+
+### Added
+- **Long-Context Stress Testing (`--context-chars`, `--long-seeds`)**: Deterministically injects realistic settled prior-turn RP history packed with numerical distractors (old prices, old damage, old potion uses) between the variable rules and `CURRENT stat_data` to measure long-context rule recall & historical-number bleed-through resistance.
+- **Custom History Filler Hook (`preset.buildHistoryFiller(seed, targetChars)`)**: Allows any card preset to supply world-accurate prior-turn distractor prose.
+- **Multi-Turn Zero-Truncation Chunking (`workflows/antigravity_fuzz.py`)**: Automatically splits prompts >42k chars into stateful multi-turn sessions (`chunk_size=26000`) so ultra-long contexts (~90k+ chars) never hit single-turn input truncation ceilings.
+- **Standard vs Long-Context Comparison Metrics**: `buildHeatmapReport` and `workflows/antigravity_fuzz.py` automatically emit side-by-side Standard vs Long-Context hit rates whenever long-context seeds are present.
+- **Expanded Self-Check Suite**: Added 3 deterministic unit tests covering history filler determinism, prompt section ordering, custom filler hooks, and mixed-context heatmap reporting (10/10 passing).
+
+## [0.1.1] - 2026-11-26
+
+### Added
+- Added AI-Agent-native operational guide (`AGENTS.md`), explicit complex-framework scope notes, and clear instructions on replacing the included minimal demo preset with any user variable system.
+
 ## [0.1.0] - 2026-11-26
 
 ### Added

@@ -77,10 +77,10 @@ Usage:
   mvu-seedfuzz selftest     [--preset presets/minimal-rpg.mjs]
   mvu-seedfuzz list-ops     [--preset presets/minimal-rpg.mjs]
   mvu-seedfuzz gen          --seed 1001 --k 4 [--preset ...] [--out case.json]
-  mvu-seedfuzz check-story  --seed 1001 --k 4 --story-file s.txt [--prompt-out p.txt] [--preset ...]
+  mvu-seedfuzz check-story  --seed 1001 --k 4 --story-file s.txt [--context-chars 55000] [--prompt-out p.txt] [--preset ...]
   mvu-seedfuzz grade        --seed 1001 --k 4 --output-file out.txt [--preset ...]
   mvu-seedfuzz report       --results-file results.json [--md-out heatmap.md]
-  mvu-seedfuzz run          --seeds 1001..1010 --k 4 --api-url <url> --api-key <key> --model <name> [--preset ...] [--concurrency 3] [--md-out heatmap.md]
+  mvu-seedfuzz run          --seeds 1001..1010 [--long-seeds 1008..1010 --context-chars 55000] --k 4 --api-url <url> --api-key <key> --model <name> [--preset ...] [--concurrency 3] [--md-out heatmap.md]
 `);
   process.exit(0);
 }
@@ -141,9 +141,12 @@ if (cmd === 'check-story') {
   const story = fs.readFileSync(args['story-file'], 'utf8');
   const tc = generateCase(preset, Number(args.seed || 1001), { k: Number(args.k || 4) });
   const chk = verifyGeneratedStory(tc, story);
+  const contextChars = Math.max(0, Number(args['context-chars'] || 0));
   if (args['prompt-out']) {
     fs.mkdirSync(path.dirname(path.resolve(args['prompt-out'])), { recursive: true });
-    fs.writeFileSync(args['prompt-out'], buildBlindUpdaterPrompt(preset, tc, story, args), 'utf8');
+    const promptTxt = buildBlindUpdaterPrompt(preset, tc, story, { ...args, contextChars });
+    fs.writeFileSync(args['prompt-out'], promptTxt, 'utf8');
+    chk.blindPromptChars = promptTxt.length;
   }
   console.log(JSON.stringify(chk, null, 2));
   process.exit(0);
@@ -169,6 +172,8 @@ if (cmd === 'report') {
 
 if (cmd === 'run') {
   const seeds = parseSeedList(args.seeds || '1001..1006');
+  const longSeedSet = new Set(args['long-seeds'] ? parseSeedList(args['long-seeds']) : []);
+  const defaultContextChars = Math.max(0, Number(args['context-chars'] || 0));
   const k = Number(args.k || 4);
   const concurrency = Math.max(1, Math.min(12, Number(args.concurrency || 3)));
   const apiUrl = args['api-url'] || process.env.FUZZ_API_URL;
@@ -196,12 +201,18 @@ if (cmd === 'run') {
         story = await callLLM({ apiUrl: storyUrl, apiKey: storyKey, model: storyModel, prompt: retryPrompt, temperature: 0.25 });
         chk = verifyGeneratedStory(tc, story);
       }
-      const blindPrompt = buildBlindUpdaterPrompt(preset, tc, story, args);
+      const seedCtxChars = longSeedSet.size > 0
+        ? (longSeedSet.has(seed) ? (defaultContextChars || 55000) : 0)
+        : defaultContextChars;
+      const blindPrompt = buildBlindUpdaterPrompt(preset, tc, story, { ...args, contextChars: seedCtxChars });
       const updOut = await callLLM({ apiUrl, apiKey, model, prompt: blindPrompt, temperature: 0.1 });
       const g = gradeUpdaterOutput(preset, tc, updOut);
       g.storyValid = chk.ok;
+      g.isLongContext = seedCtxChars > 0;
+      g.promptChars = blindPrompt.length;
       results[idx] = g;
-      console.log(`[SEED ${seed}] storyOk=${chk.ok} passed=${g.passedOps}/${g.totalOps} drift=${g.driftWarnings.length}`);
+      const modeTag = g.isLongContext ? `LONG(${g.promptChars}c)` : `STD(${g.promptChars}c)`;
+      console.log(`[SEED ${seed}] [${modeTag}] storyOk=${chk.ok} passed=${g.passedOps}/${g.totalOps} drift=${g.driftWarnings.length}`);
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, seeds.length) }, () => worker()));

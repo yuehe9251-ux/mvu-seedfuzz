@@ -75,7 +75,14 @@ node src/cli.mjs selftest --preset presets/<user-card>.mjs
 
 ---
 
-## 3. Hard Guardrails for Agents
+## 3. Long-Context Stress Testing (Optional, Recommended for Main-Model Cards)
+- For cards used in **single-model full-history mode** (or Extra-Model mode with long chat history enabled), pass `--long-seeds` + `--context-chars 55000` (CLI) or `long_seeds` + `long_context_chars: 55000` (`workflows/antigravity_fuzz.py`).
+- `workflows/antigravity_fuzz.py` automatically chunks prompts over 42,000 chars into stateful multi-turn sessions (`chunk_size=26000`) so zero bytes are truncated by single-message caps.
+- Optionally implement `preset.buildHistoryFiller(seed, targetChars)` to inject world-accurate settled prior turns with realistic numerical distractors.
+
+---
+
+## 4. Hard Guardrails for Agents
 - NEVER leak `expectedPatches`, `expectedStatData`, or `verify` logic into AI-B's blind prompt (`buildBlindUpdaterPrompt`).
 - NEVER modify `src/engine.mjs` to hardcode card-specific Chinese/English field names; keep all card-specific logic isolated inside `presets/<user-card>.mjs`.
 - Always preserve failing `seed` numbers in your report to the user as permanent regression anchors.
