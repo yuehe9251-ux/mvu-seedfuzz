@@ -89,8 +89,12 @@ phase(f"3. Blind Variable Update Evaluation in Parallel (AI-B: {target_model})")
 
 async def eval_updater(bundle):
     s = bundle["seed"]
+    strict_prompt = (
+        bundle["blind_prompt"]
+        + "\n\n[CRITICAL OUTPUT REQUIREMENT] Pass the COMPLETE `<UpdateVariable><JSONPatch>[...]</JSONPatch></UpdateVariable>` block verbatim as your `finish` tool result string. NEVER return a confirmation summary sentence like 'Successfully generated'."
+    )
     out = await agent(
-        bundle["blind_prompt"],
+        strict_prompt,
         schema={"type": "string"},
         role=f"AI-B Updater({target_model}) seed={s}",
         model=target_model,
