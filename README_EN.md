@@ -1,8 +1,18 @@
+<div align="center">
+
 # MVU-SeedFuzz
 
-> **Seed-Driven Reverse-Oracle Variable Fuzzing & Vulnerability Heatmap for SillyTavern / MVU / AI RP Character Cards**
+**Seed-Driven Reverse-Oracle Variable Fuzzing & Vulnerability Heatmap for Complex AI RP Character Cards**
 
-[English](./README_EN.md) · [中文文档](./README.md) · [MIT License](./LICENSE)
+[![CI](https://github.com/yuehe9251-ux/mvu-seedfuzz/actions/workflows/ci.yml/badge.svg)](https://github.com/yuehe9251-ux/mvu-seedfuzz/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Dependencies](https://img.shields.io/badge/Dependencies-0-brightgreen)](#key-features)
+[![Agent Native](https://img.shields.io/badge/AI_Agent-AGENTS.md_Ready-orange)](./AGENTS.md)
+
+[English](./README_EN.md) · [中文文档](./README.md) · [AI Agent Guide (`AGENTS.md`)](./AGENTS.md) · [Changelog](./CHANGELOG.md)
+
+</div>
 
 ---
 
@@ -10,74 +20,65 @@
 
 > [!IMPORTANT]
 > **Built for Complex Stateful Variable Frameworks**  
-> If your RP card only tracks 2–3 flat counters (e.g., HP & Affection), manual testing is enough.  
-> `mvu-seedfuzz` is engineered for **complex variable frameworks** (15–60+ coupled variables, reference-based equipment repos, signed debuffs, background monitor derivations such as guild taxes / EXP multipliers / cross-day revenue, and strict schema validation) where concurrent multi-rule interactions break weak or fast LLMs.
+> If your RP card only tracks 2–3 flat counters (e.g., HP & Affection), manual playtesting is sufficient.  
+> `MVU-SeedFuzz` is engineered for **complex variable frameworks** (15–60+ coupled variables, reference-based gear repositories, signed debuffs, background monitor derivations such as guild taxes / EXP multipliers / cross-day revenue, and strict schema validation) where concurrent multi-rule interactions break weak or fast LLMs.
 
 > [!NOTE]
-> **Personal Demo Notice**: The bundled `presets/minimal-rpg.mjs`, `presets/sillytavern-card-template.mjs`, and `examples/sample-heatmap.md` are **personal illustrative examples only**—their schemas and paths are NOT fixed standards. Always replace them with your own framework preset following the guide below.
-
-> 🤖 **AI Agent Fast-Track (`AGENTS.md`)**:  
-> This repository ships with a dedicated [**`AGENTS.md`**](./AGENTS.md) written specifically for coding agents (Antigravity, Claude Code, Cursor, Codex). Point your agent at your card + `AGENTS.md` and ask it to generate a custom preset, pass `selftest`, and run a fuzz sweep automatically.
+> **Personal Demo Notice**: The bundled `presets/minimal-rpg.mjs`, `presets/sillytavern-card-template.mjs`, and `examples/sample-heatmap.md` are **author-provided illustrative demo frameworks only**—their schemas and paths are NOT fixed standards. Always replace them with your own preset following the guide below.
 
 ---
 
-## Motivation
+## How It Works (Reverse-Oracle Fuzzing)
 
-Building stateful AI Roleplay (RP) character cards (SillyTavern + MagVarUpdate / MVU / TavernHelper) suffers from three classic QA problems:
-1. **Tiny manual test coverage**: Hand-written playtests only cover common flows, rarely hitting tricky concurrent state combinations (e.g., *guild tax + auto level-up + negative-AGI debuff + reference-based weapon swap* in the same turn).
-2. **Blind rule tuning**: When you trim worldbook prompts or test cheaper/faster models (e.g., Flash / Flash-Lite / local models), you have no quantitative view of *which exact variable rule* breaks first.
-3. **Noisy AI judges**: `LLM-as-a-Judge` evaluators hallucinate arithmetic and miss silent state drift (such as overwriting a parent container and wiping existing companions/inventory).
+Traditional RP testing writes stories first and manually guesses expected variable states—covering few edge cases and inviting noisy `LLM-as-a-Judge` hallucinations.  
+**`MVU-SeedFuzz` reverses the pipeline**: start from an indexed variable-mutation vector, sample valid concurrent deltas deterministically via `seed`, compute ground truth through your real code oracle, have **AI-A** synthesize pure RP prose, blind-test **AI-B** on ONLY the prose + real card rules, and grade deterministically!
 
-**MVU-SeedFuzz flips the testing pipeline (Reverse-Oracle Fuzzing):**
-Instead of writing stories first and guessing answers, it flattens all mutable state variables into an indexed operator vector, uses a deterministic PRNG `seed` to sample valid concurrent mutations, computes exact ground truth via your real code oracle, asks **AI-A** to reverse-synthesize pure natural-language RP prose, blind-tests **AI-B** on ONLY the prose + real card rules, and grades the resulting `<UpdateVariable><JSONPatch>` deterministically!
-
-```text
-[Indexed Mutable-Variable Vector OPS[0..N]] + [Conflict Groups]
-           │
-           ▼  Deterministic PRNG (Mulberry32, seed) samples k compatible mutations
-   [Expected Patches] ──(Real Monitor/State Oracle)──▶ [Exact Expected State]
-           │
-           ▼  AI-A Reverse Story Writer (strict no-extra-side-effects prompt)
-   [Pure RP Story Prose] ──(Token & Anti-Leak Gate)──▶ Auto-retry on omission
-           │
-           ▼  AI-B Blind Evaluation (real card rules + initial state + story ONLY)
-   [Model <UpdateVariable>] ──(Real Monitor/State Oracle)──▶ [Actual State]
-           │
-           ▼  Per-Operator Exact/Derived/Structural Grading + Drift Detection
-   [Per-Variable Vulnerability Heatmap] + [100% Reproducible Failing Seeds]
+```mermaid
+flowchart TD
+    A["Indexed Variable Vector OPS[0..N]<br/>(with Conflict Groups)"] -->|"Mulberry32 PRNG (seed) samples k ops"| B["Expected Patches"]
+    B -->|"Run Real Monitor / State Oracle"| C["Exact Expected State"]
+    B -->|"AI-A Reverse Story Writer (strict no-extra-side-effects)"| D["Pure RP Story Prose"]
+    D -->|"Token & Anti-Leak Gate (auto-retry on omission)"| E["AI-B Blind Updater<br/>(real card rules + initial state + story ONLY)"]
+    E -->|"Emit Variable Update Block"| F["Run Real Monitor / State Oracle"]
+    F --> G["Actual State"]
+    C --> H{"3-Tier Deterministic Grader + Drift Guard"}
+    G --> H
+    H --> I["Per-Variable Vulnerability Heatmap<br/>+ 100% Reproducible Failing Seeds"]
 ```
+
+### Comparison
+
+| Aspect | Manual RP Playtesting | Static Dataset + LLM Judge | **MVU-SeedFuzz** |
+| :--- | :--- | :--- | :--- |
+| Concurrent multi-variable coverage | Very low | Limited to hand-written cases | **High (PRNG combinations across all operators)** |
+| Grading reliability | Prone to missing silent drift | LLM judges hallucinate math | **100% deterministic code oracle** |
+| Regression reproducibility | Non-reproducible | Fixed cases only | **Exact replay via `seed=xxxx`** |
+| Catches bugs in monitor scripts | Rarely | Never | **Yes (via zero-token `selftest`)** |
+| Actionable rule diagnostics | Gut feeling | Coarse score | **Per-variable hit-rate heatmap** |
 
 ---
 
 ## Key Features
 
-- **Zero dependencies**: Pure Node.js (`>= 18`) ESM — works immediately with no `npm install`.
-- **100% deterministic regression seeds**: Every failing case maps to an integer `seed`. Edit your worldbook rules, re-run the same seeds, and measure the exact delta in hit rate.
-- **Real code oracle (Zero-Hallucination Grading)**: Plug in your card's actual derived-stat/monitor script so derived rules (tax splits, EXP multipliers, cross-day asset revenue, natural regen) are verified mathematically — often uncovering real bugs in your monitor script itself during `selftest`.
-- **Two-layer anti-noise guardrails**:
-  - Pre-gate checks AI-A's synthesized story for missing numbers/proper nouns or leaked JSONPatch tags before AI-B is ever graded;
-  - Drift guard checks untouched domains for accidental parent-container overwrites.
+- **Zero dependencies**: Pure Node.js (`>= 18`) ESM — runs immediately with no `npm install`.
+- **Framework-agnostic**: Supports RFC-6902 `JSONPatch` + `delta` out of the box, and exposes `parseModelOutput` + `applyUpdate` hooks for **classic `_.set`, YAML blocks, or custom XML/regex DSLs**.
+- **Two-layer anti-noise guardrails**: Story pre-gate catches omitted numbers/names or leaked tags; drift guard catches catastrophic parent-container overwrites.
 - **Dual execution modes**:
-  - Standalone CLI supporting any OpenAI-compatible Chat Completions endpoint or Google Gemini native REST endpoint (`--concurrency N`);
-  - Optional multi-agent workflow template (`workflows/antigravity_fuzz.py`).
+  - Standalone CLI with OpenAI-compatible Chat Completions & Google Gemini REST API support (`--concurrency N`);
+  - Native AI Agent onboarding via [`AGENTS.md`](./AGENTS.md) and [`workflows/antigravity_fuzz.py`](./workflows/antigravity_fuzz.py).
 
 ---
 
 ## Quick Start
 
-### 1. Run zero-cost unit & oracle self-tests
 ```bash
+git clone https://github.com/yuehe9251-ux/mvu-seedfuzz.git
+cd mvu-seedfuzz
 npm test
 npm run selftest
 ```
 
-### 2. Inspect operators & generate a deterministic seed prompt
-```bash
-node src/cli.mjs list-ops --preset presets/minimal-rpg.mjs
-node src/cli.mjs gen --preset presets/minimal-rpg.mjs --seed 1001 --k 4
-```
-
-### 3. Run automated blind fuzzing & generate a vulnerability heatmap
+Run a 10-seed blind fuzz sweep against any OpenAI-compatible or Gemini endpoint:
 ```bash
 node src/cli.mjs run \
   --preset presets/minimal-rpg.mjs \
@@ -93,22 +94,29 @@ node src/cli.mjs run \
 
 ---
 
-## How to Replace with Your Own Variable Framework
+## Replacing with Your Own Variable Framework
 
-The core engine (`src/engine.mjs`) is **100% decoupled** from the demo presets. You can plug in **any** complex variable framework—JSONPatch MVU, classic `_.set` MagVarUpdate, YAML status blocks, or custom regex/XML DSLs:
+### Option A — Let Your AI Coding Agent Adapt It Automatically (Recommended)
+Point Antigravity, Claude Code, Cursor, or Codex at [`AGENTS.md`](./AGENTS.md) and your character card:
 
-1. **Create `presets/my-framework.mjs`** (start from [presets/sillytavern-card-template.mjs](./presets/sillytavern-card-template.mjs)):
-   - `createBaseState()` — your card's baseline `stat_data`;
-   - `loadRules(options)` — your live worldbook / prompt rules (helper `extractWorldbookRulesFromCard` reads SillyTavern `.json` cards directly);
-   - `operators[]` — your indexed mutable variable operators (`conflicts`, `storyFact`, `requiredTokens`, `expectedPatches`, `verify`);
-   - `runOracle(state, turn)` *(optional)* — your real background monitor / derived-stat script (`loadEmbeddedMonitor` helper included);
-   - `checkDrift(actual, base, picked)` *(recommended)* — guards untouched containers against accidental overwrites;
-   - `parseModelOutput(rawText)` & `applyUpdate(base, parsed)` *(optional)* — **override these two hooks to support ANY non-JSONPatch variable syntax** (`_.set`, YAML, XML, custom DSL).
-2. **Verify zero-token oracle self-consistency first**:
-   ```bash
-   node src/cli.mjs selftest --preset presets/my-framework.mjs
-   ```
-3. **Run blind fuzzing with `--preset presets/my-framework.mjs`**, or simply let your AI coding agent handle steps 1–3 automatically using [**`AGENTS.md`**](./AGENTS.md)!
+```text
+Read mvu-seedfuzz/AGENTS.md, inspect my character card's schema, worldbook rules, and monitor script,
+generate presets/my-card.mjs, pass zero-token `selftest`, then fuzz 12 seeds and report the vulnerability heatmap.
+```
+
+### Option B — Author `presets/my-framework.mjs` Manually
+Start from [presets/sillytavern-card-template.mjs](./presets/sillytavern-card-template.mjs):
+- `createBaseState()` — your card's baseline `stat_data`;
+- `loadRules(options)` — your live worldbook / prompt rules (`extractWorldbookRulesFromCard` included);
+- `operators[]` — your indexed variable operators (`conflicts`, `storyFact`, `requiredTokens`, `expectedPatches`, `verify`);
+- `runOracle(state, turn)` *(optional)* — your real monitor / derived-stat script (`loadEmbeddedMonitor` included);
+- `checkDrift(actual, base, picked)` *(recommended)* — detects unintended side-effect drift;
+- `parseModelOutput(rawText)` & `applyUpdate(base, parsed)` *(optional)* — override for any non-JSONPatch syntax (`_.set`, YAML, XML, custom DSL).
+
+Verify 100% oracle consistency before spending any LLM tokens:
+```bash
+node src/cli.mjs selftest --preset presets/my-framework.mjs
+```
 
 ---
 

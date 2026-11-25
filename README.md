@@ -1,86 +1,92 @@
+<div align="center">
+
 # MVU-SeedFuzz
 
-> **面向 SillyTavern / MVU / AI RP 变量卡的“种子驱动逆向真值模糊测试”框架**  
-> **Seed-Driven Reverse-Oracle Variable Fuzzing & Vulnerability Heatmap for AI RP Character Cards**
+**面向 SillyTavern / MVU / 复杂 AI RP 变量框架的“种子驱动逆向真值模糊测试”引擎**  
+*Seed-Driven Reverse-Oracle Variable Fuzzing & Vulnerability Heatmap for Complex AI RP Character Cards*
 
-[中文说明](./README.md) · [English README](./README_EN.md) · [MIT License](./LICENSE)
+[![CI](https://github.com/yuehe9251-ux/mvu-seedfuzz/actions/workflows/ci.yml/badge.svg)](https://github.com/yuehe9251-ux/mvu-seedfuzz/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Dependencies](https://img.shields.io/badge/Dependencies-0-brightgreen)](#核心特性)
+[![Agent Native](https://img.shields.io/badge/AI_Agent-AGENTS.md_Ready-orange)](./AGENTS.md)
+
+[中文文档](./README.md) · [English README](./README_EN.md) · [AI Agent 接入指南 (`AGENTS.md`)](./AGENTS.md) · [更新日志](./CHANGELOG.md)
+
+</div>
 
 ---
 
-## 适用场景与定位
+## 适用定位与重要说明
 
 > [!IMPORTANT]
-> **专为复杂变量框架打造（Complex Stateful Variable Frameworks）**  
-> 如果你的角色卡只有 2~3 个简单数值（如单纯 HP / 好感度），直接人工试聊即可。  
-> `mvu-seedfuzz` 专门解决**大型复杂状态机 / 复杂 MVU 变量框架**（15~60+ 跨域变量、引用式装备库、负属性 Debuff、自动抽税/经验倍率/跨日营收等后台监视器联动、严格 Zod Schema 校验）在多变量并发与弱模型下的隐蔽翻车问题。
+> **专为大型复杂变量框架设计（Complex Stateful Variable Frameworks）**  
+> 如果你的角色卡只追踪 2~3 个平面数值（如单纯血量 / 好感度），直接人工跑团即可。  
+> `MVU-SeedFuzz` 专为拥有 **15~60+ 跨域变量、引用式装备库、负属性 Debuff、后台监视器自动派生结算（抽税 / 经验倍率 / 跨日营收 / 自动回血）与严格 Schema 校验** 的复杂变量卡而设计，专治弱模型或多规则并发时的隐蔽填表漏洞。
 
 > [!NOTE]
-> **示例声明**：本仓库内置的 `presets/minimal-rpg.mjs`、`presets/sillytavern-card-template.mjs` 与 `examples/sample-heatmap.md` **仅为作者用于演示机制的个人示例框架**，其字段名（如 `/player/hp`、`/bag/gold`）与世界书示例并非固定标准——**请务必按下方指南替换为你自己的变量框架与规则！**
-
-> 🤖 **给 AI Agent（Antigravity / Claude Code / Cursor / Codex）用户的快捷通道**：  
-> 仓库根目录已内置专门写给 Agent 读的接入规范 [**`AGENTS.md`**](./AGENTS.md)。你可以直接把本仓库与你的角色卡放在一起，对 Agent 说：  
-> *“阅读 `AGENTS.md`，帮我把我的角色卡接入 `mvu-seedfuzz`，先跑通 `selftest` 再盲测 10 个种子出热力图。”*
+> **个人示例声明**：仓库内置的 `presets/minimal-rpg.mjs`、`presets/sillytavern-card-template.mjs` 与 `examples/sample-heatmap.md` **仅为演示机制的个人示例框架**，其字段路径并非统一标准——使用前请务必按下方指南或交由你的 AI Agent 替换为**你自己的变量框架**！
 
 ---
 
-## 为什么做这个工具？
+## 核心反转思路（Reverse-Oracle Fuzzing）
 
-开发带有复杂状态栏 / MVU（MagVarUpdate）变量系统的 AI RP 角色卡时，作者通常面临三大痛点：
-1. **手测覆盖面极窄**：人工跑团来回只测“打怪、掉钱、买药、加好感”那几条老路，**多变量并发冲突**（如“跨日资产收益 + 公会 10% 抽税 + 负属性 Debuff + 引用式换装”同时发生）几乎永远测不到。
-2. **模型幻觉难以定位**：改了一版世界书规则或换了一个便宜弱模型（如 Flash / FlashLite），到底哪一条变量规则最容易写错、漏写或覆写父容器？纯靠体感完全说不清。
-3. **传统 AI 裁判本身也会犯错**：`SimUser + LLM-as-a-Judge` 不仅慢、贵，而且 AI 裁判经常自己算错倍率或放过静默漂移。
+传统测法是**“先人工写剧情 → 再肉眼/让 AI 猜答案”**，既测不全多变量并发组合，又容易被 AI 裁判的幻觉误导。  
+`MVU-SeedFuzz` 彻底反转链路：**以“变量”为源头，用确定性种子随机抽组合算出精确真值，让 AI-A 把真值反译成纯自然语言剧情，再用纯剧情盲测 AI-B，最后交由你自己的代码状态机精确裁判！**
 
-**MVU-SeedFuzz 的核心反转思路（Reverse-Oracle Fuzzing）**：  
-**不再先写剧情再猜答案——而是把所有可变项排成一列，用确定性种子随机抽组合算出精确真值，让 AI-A 把真值“反译”成纯自然语言剧情，再拿纯剧情去盲测 AI-B 填表，最后由你自己的真实代码状态机（Oracle）精确裁判！**
-
-```text
-[全变量原子算子列 OPS[0..N]] + [互斥约束组]
-           │
-           ▼  确定性 PRNG (Mulberry32, seed) 抽取 k 项合法并发变动
-   [预期 Patch] ──(真实状态机/监视器)──▶ [精确真值 Expected State]
-           │
-           ▼  AI-A 逆向反推（严禁夹带私货 / 漏数字 / 泄标签）
-   [纯自然语言 RP 剧情] ──(关键词+防泄露前置门禁)──▶ 校验失败自动重写
-           │
-           ▼  AI-B 盲测（只看真实世界书规则 + 初始状态 + 剧情正文）
-   [模型输出 <UpdateVariable>] ──(真实状态机/监视器裁判)──▶ [实得 Actual State]
-           │
-           ▼  三档自动判分（精确值 / 派生联动值 / 结构合规）+ 未触及域漂移拦截
-   [分变量脆弱度热力图 heatmap.md] + [100% 可复现翻车种子 seed=xxxx]
+```mermaid
+flowchart TD
+    A["全变量原子算子列 OPS[0..N]<br/>(自带互斥约束组 conflicts)"] -->|"Mulberry32 确定性种子 seed 抽取 k 项"| B["预期变更 Expected Patches"]
+    B -->|"运行真实监视器 / 状态机 Oracle"| C["精确真值 Expected State"]
+    B -->|"AI-A 逆向反推（严禁夹带私货 / 泄标签）"| D["纯自然语言 RP 剧情正文"]
+    D -->|"关键词 + 防泄露前置门禁（漏词自动重写）"| E["AI-B 纯盲测<br/>(仅看真实世界书规则 + 初始状态 + 剧情)"]
+    E -->|"输出变量更新指令"| F["运行真实监视器 / 状态机 Oracle"]
+    F --> G["实得状态 Actual State"]
+    C --> H{"三档精确判分 + 未触及域漂移拦截"}
+    G --> H
+    H --> I["分变量脆弱度热力图 heatmap.md<br/>+ 100% 可复现翻车种子 seed=xxxx"]
 ```
+
+### 与传统测法对比
+
+| 维度 | 人工跑团手测 | 固定题库 + LLM 裁判 | **MVU-SeedFuzz** |
+| :--- | :--- | :--- | :--- |
+| 多变量并发覆盖 | 极低（只测常见路径） | 有限（依赖手写题库） | **高（确定性种子随机组合全部算子）** |
+| 裁判准确度 | 依赖肉眼易漏静默漂移 | AI 裁判自身会算错/幻觉 | **100% 确定性代码状态机裁判（零幻觉）** |
+| 复现回归能力 | 无法复现 | 只能重跑死题 | **凭 `seed=xxxx` 一键 100% 精准复现** |
+| 能否抓监视器代码 Bug | 很难 | 不能 | **能（`selftest` 阶段即可先抓监视器崩溃）** |
+| 量化定位世界书短板 | 纯靠体感 | 粗粒度总分 | **精确到单条变量的命中率热力图** |
 
 ---
 
 ## 核心特性
 
-- **零第三方依赖**：纯 Node.js（`>= 18`）ESM 实现，无需 `npm install` 即可开箱运行。
-- **100% 确定性种子回归**：同一 `seed` 永久生成完全相同的变量组合与数值，修完世界书规则或监视器后重跑同一批 `seed`，直接对比命中率提升。
-- **真实代码状态机裁判（Zero-Hallucination Oracle）**：支持挂载角色卡自己的 `monitor.js` / 派生结算脚本，自动校验“经验倍率、公会抽税、自动升级、跨日收益”等联动结果，甚至能在自检阶段顺手抓出监视器本身的代码 Bug。
-- **防脏题干 + 防静默漂移双护栏**：
-  - 前置门禁确保 AI-A 反推剧情没有遗漏关键数字/专名、没有泄露 `<JSONPatch>` 标签；
-  - 漂移守卫拦截模型“覆写父容器导致原有好友/装备库清空”或“擅自篡改未提及字段”。
-- **双模运行**：
-  - **外部 API 命令行模式**：原生支持任意 OpenAI 兼容端点（DeepSeek / OpenRouter / 本地 Ollama / 中转站）及 Google Gemini 原生 REST API，支持并发压测；
-  - **Agent 并发工作流模式**：附带 `workflows/antigravity_fuzz.py`，可在支持多 Agent 工作流的桌面端直接零外部 Key 并发试跑。
+- **零第三方依赖**：纯 Node.js（`>= 18`）ESM，下载即跑，无需 `npm install`。
+- **框架无关，彻底解耦**：默认内置 RFC-6902 `JSONPatch` + `delta` 解析器；通过 `parseModelOutput` 与 `applyUpdate` 两个钩子，**经典 `_.set`、YAML 状态块、自定义 XML/正则变量框架均可无缝替换**。
+- **双护栏防假阳性**：前置门禁自动拦截 AI-A 漏写数字或泄露标签；漂移守卫自动拦截模型覆写父容器清空旧队友/备用装备库。
+- **双模并发执行**：
+  - **外部 API CLI 模式**：原生兼容所有 OpenAI Chat Completions 端点（DeepSeek / OpenRouter / Ollama / 中转站）与 Google Gemini REST API，支持 `--concurrency N` 并发；
+  - **AI Agent 工作流模式**：内置 [`AGENTS.md`](./AGENTS.md) 与 [`workflows/antigravity_fuzz.py`](./workflows/antigravity_fuzz.py)，支持一键交由 Coding Agent 自动适配并并发压测。
 
 ---
 
 ## 30 秒快速上手
 
-### 1. 运行内置自检（零 API 消耗）
-验证内置 `minimal-rpg` 预设的 12 个算子 + 10 组随机并发组合种子 + 漂移检测全部 100% 通过：
+### 1. 运行内置零 Token 自检
 ```bash
+git clone https://github.com/yuehe9251-ux/mvu-seedfuzz.git
+cd mvu-seedfuzz
 npm test
 npm run selftest
 ```
 
-### 2. 查看算子列 & 预览单个种子生成的反推剧情提示词
+### 2. 预览确定性种子生成的反推剧情指令
 ```bash
 node src/cli.mjs list-ops --preset presets/minimal-rpg.mjs
 node src/cli.mjs gen --preset presets/minimal-rpg.mjs --seed 1001 --k 4
 ```
 
-### 3. 接入你的 API 跑 10 种子并发盲测并输出热力图
+### 3. 接入 API 跑 10 种子并发盲测并生成热力图
 ```bash
 node src/cli.mjs run \
   --preset presets/minimal-rpg.mjs \
@@ -93,55 +99,54 @@ node src/cli.mjs run \
   --story-model gemini-2.5-flash \
   --md-out heatmap.md
 ```
-> 也支持环境变量 `FUZZ_API_URL` / `FUZZ_API_KEY` / `FUZZ_MODEL`，以及直接传入 Google Gemini 原生 `generateContent` 地址。
+> 同样支持环境变量 `FUZZ_API_URL` / `FUZZ_API_KEY` / `FUZZ_MODEL`，以及 Google Gemini 原生 `generateContent` 接口。
 
 ---
 
-## 如何更换为你自己的变量框架（完全解耦）
+## 如何更换为你自己的变量框架
 
-本工具把**测试引擎（`src/engine.mjs`）**与**具体变量框架（`presets/*.mjs`）**彻底拆离。内置的 `minimal-rpg.mjs` 只是个人示例，你可以按以下 4 步替换为**任意复杂变量框架**（不限于 JSONPatch，也支持传统 `_.set`、YAML、自定义正则状态栏）：
+### 方式一：交给 AI Agent 全自动适配（推荐）
+本仓库已内置面向 Antigravity / Claude Code / Cursor / Codex 的专属操作手册 [**`AGENTS.md`**](./AGENTS.md)。直接把本仓库与你的角色卡放在一起，对 Agent 发送：
 
-### 第 1 步：新建你自己的预设文件
-复制 [presets/sillytavern-card-template.mjs](./presets/sillytavern-card-template.mjs) 为 `presets/my-framework.mjs`，按需实现以下接口：
+```text
+请先阅读 mvu-seedfuzz/AGENTS.md，然后扫描我的角色卡 Schema、世界书变量规则和监视器脚本，
+为我生成专属预设 presets/my-card.mjs，先跑通零 Token 的 selftest，
+再帮我盲测 12 个种子并输出分变量脆弱度热力图与世界书优化建议。
+```
 
-| 接口字段 | 必填 | 如何替换为你的框架 |
+### 方式二：手动新建 `presets/my-framework.mjs`
+复制 [presets/sillytavern-card-template.mjs](./presets/sillytavern-card-template.mjs)，按你的框架实现以下接口：
+
+| 接口字段 | 必填 | 用途说明 |
 | :--- | :---: | :--- |
-| `createBaseState()` | 必填 | 换成你框架的初始完整 `stat_data`（建议放齐各类示例条目，方便第 1 轮直接测试增删改） |
-| `loadRules(options)` | 必填 | 返回你要测的真实规则文本（可用内置 `extractWorldbookRulesFromCard('./my-card.json')` 直读酒馆卡世界书，或直接读你的 `.md`/`.txt` 规则文件） |
-| `operators` | 必填 | 把你的全部可变项排成原子算子数组，每项写明 `conflicts`（互斥组）、`storyFact`、`requiredTokens`、`expectedPatches`、`verify()` |
-| `runOracle(state, turn)` | 可选 | 挂载你自己的后台监视器 / 派生属性结算脚本（可用 `loadEmbeddedMonitor` 直载酒馆助手脚本）；若框架无后台自动计算，直接省略即可 |
-| `checkDrift(act, base, picked)` | 推荐 | 写几条“未触及域防漂移”断言（如：未要求改好友时绝不能清空好友表） |
-| `parseModelOutput(rawText)` | 可选 | **更换非 JSONPatch 框架的关键钩子！** 默认解析 `<UpdateVariable><JSONPatch>[...]`；若你的框架用 `_.set(...)`、YAML 或自定义正则标签，覆写此函数返回 `{ ok, patches, error }` 即可 |
-| `applyUpdate(base, parsed)` | 可选 | 配合 `parseModelOutput` 使用，定义如何把你自己的指令应用到 `base` 上，返回 `{ statData, applied, errors }` |
+| `createBaseState()` | 必填 | 返回你框架的初始基准 `stat_data`（预置好各类实体以便首轮直接测增删改） |
+| `loadRules(options)` | 必填 | 返回盲测时注入 AI-B 的真实规则（可用 `extractWorldbookRulesFromCard` 直读酒馆卡 `.json`） |
+| `operators` | 必填 | 把全部可变项写为原子算子列（`conflicts` / `storyFact` / `requiredTokens` / `expectedPatches` / `verify`） |
+| `runOracle(state, turn)` | 可选 | 挂载你自己的后台监视器 / 派生结算引擎（可用 `loadEmbeddedMonitor` 直载酒馆助手脚本） |
+| `checkDrift(act, base, picked)` | 推荐 | 校验未触及容器防误删/防漂移 |
+| `parseModelOutput(rawText)` | 可选 | **非 JSONPatch 框架接入钩子**（如 `_.set` / YAML / 自定义标签），返回 `{ ok, patches, error }` |
+| `applyUpdate(base, parsed)` | 可选 | 配合 `parseModelOutput` 应用自定义更新指令，返回 `{ statData, applied, errors }` |
 
-### 第 2 步：先跑零 Token 自检门禁
+完成后务必先过零 Token 门禁：
 ```bash
 node src/cli.mjs selftest --preset presets/my-framework.mjs
 ```
-确保全部单算子 + 10 组随机组合种子 **100% 自洽通过**后再调大模型（顺手还能提前测出你监视器脚本里的代码 Bug）。
-
-### 第 3 步：指定 `--preset` 开跑压测
-```bash
-node src/cli.mjs run --preset presets/my-framework.mjs --card ./my-card.json --seeds 1001..1015 --k 4 --api-url ... --model ... --md-out heatmap.md
-```
-
-### 第 4 步：懒人法 —— 直接交给 AI Agent 自动适配
-如果你不想手写 30 个算子，直接让你的 AI Coding Agent 阅读根目录的 [**`AGENTS.md`**](./AGENTS.md)，它会自动扫描你的角色卡 Schema 与世界书、生成 `presets/my-framework.mjs`、跑通 `selftest` 并交付脆弱度热力图。
 
 ---
 
-## 输出热力图样例
+## 热力图输出样例
 
-详见 [examples/sample-heatmap.md](./examples/sample-heatmap.md) —— 谁容易错、哪个种子翻车、具体期望值 vs 实得值一目了然：
+完整样例见 [examples/sample-heatmap.md](./examples/sample-heatmap.md)：
 
 | Domain | Operator ID | Variable Mutation | Pass/Total | Hit Rate | Failing Seeds & Diagnostics |
 | :--- | :--- | :--- | :---: | :---: | :--- |
-| World | `world_time_regen` | Advance time +15m (auto regen) | 1/2 | 🟡 50% | seed=1008(expected hp=470, got 420) |
-| Economy | `gold_gain_taxed` | Earn Gold (10% auto guild tax) | 3/3 | 🟢 100% | — |
-| Gear | `equip_swap_ref` | Swap weapon via repo key | 4/4 | 🟢 100% | — |
+| Spatial | `map_spatial_move` | 3D map spatial move command | 0/2 | 🔴 0% | seed=1003(missing spatial rule entry); seed=1005(used landmark ID) |
+| Economy | `guild_vault_donate` | Donate currency to guild vault | 1/1 | 🟢 100% | — |
+| Gear | `equip_swap_ref` | Reference-based weapon swap | 2/2 | 🟢 100% | — |
+| Familiar | `fam_heart_crystal` | Familiar lethal guard -> Heart state | 2/2 | 🟢 100% | — |
 
 ---
 
-## 开源协议
+## 开源协议与贡献
 
-本项目基于 [MIT License](./LICENSE) 开源，欢迎任意角色卡作者、预设作者与酒馆开发者自由使用、二次开发与 PR 贡献预设模板！
+基于 [MIT License](./LICENSE) 开源。欢迎所有 SillyTavern 角色卡作者、MVU 开发者与 AI RP 工具作者提 Issue、分享压测热力图或 PR 贡献新的框架适配预设！
