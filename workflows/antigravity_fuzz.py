@@ -148,7 +148,8 @@ for ub in updater_bundles:
     g["promptChars"] = ub["prompt_chars"]
     grades.append(g)
     mode_tag = f"LONG({ub['prompt_chars']}c)" if ub["is_long"] else f"STD({ub['prompt_chars']}c)"
-    log(f"SEED={s} [{mode_tag}] -> {'PASS' if g['allPassed'] else f'FAIL ({g[\"passedOps\"]}/{g[\"totalOps\"]})'} | drift={len(g['driftWarnings'])}")
+    status = "PASS" if g["allPassed"] else f"FAIL ({g['passedOps']}/{g['totalOps']})"
+    log(f"SEED={s} [{mode_tag}] -> {status} | drift={len(g['driftWarnings'])}")
 
 std_g = [g for g in grades if not g["isLongContext"]]
 lng_g = [g for g in grades if g["isLongContext"]]
