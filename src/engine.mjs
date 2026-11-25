@@ -167,6 +167,7 @@ function runPresetOracle(preset, state, turnIndex) {
 export function generateCase(preset, seed, options = {}) {
   const ops = preset.operators || [];
   const k = Math.max(1, Math.min(ops.length, Number(options.k || 4)));
+  const storyChars = Math.max(120, Number(options.storyChars ?? 2500));
   const rng = mulberry32(seed);
   const baseStatData = runPresetOracle(preset, preset.createBaseState(), 1);
 
@@ -207,19 +208,18 @@ export function generateCase(preset, seed, options = {}) {
     : JSON.stringify(baseStatData, null, 2);
 
   const factsBullets = picked.map((p, i) => `${i + 1}. [${p.domain} · ${p.name}] ${p.storyFact}`).join('\n');
-  const wordGuide = picked.length <= 6
-    ? 'a natural, immersive 200-380 word RP story turn'
-    : (picked.length <= 15
-      ? 'a natural, immersive 450-800 word RP story turn (2-3 paragraphs)'
-      : `a complete, immersive 850-1500 word multi-paragraph RP climax turn (3-5 paragraphs) so all ${picked.length} mutations, exact numbers, and names fit naturally`);
+  const lowChars = Math.max(100, Math.round(storyChars * 0.88));
+  const highChars = Math.round(storyChars * 1.12);
+  const paraGuide = storyChars >= 1800 ? '6-10 rich paragraphs' : (storyChars >= 800 ? '3-5 paragraphs' : '2-3 paragraphs');
   const storyPrompt = [
     `You are a strict reverse-oracle RP story writer for preset "${preset.name}" (SEED=${seed}).`,
-    `Write ${wordGuide} in the language of the facts below that embeds EVERY listed mutation cleanly.`,
+    `Write an immersive RP story turn of approximately **${storyChars} characters** (strictly ${lowChars}-${highChars} characters across ${paraGuide}) in the language of the facts below that embeds EVERY listed mutation cleanly.`,
     ``,
     `[HARD RULES — ANY VIOLATION INVALIDATES THE TEST]`,
-    `1. Every single fact, exact number, item/skill/quest/NPC name, and duration in the list MUST appear naturally in the story prose.`,
-    `2. NEVER invent extra side effects: no unrequested free items, no extra gold/EXP/affection, no extra time skips, no unrequested HP/AP changes.`,
-    `3. Output ONLY pure story prose. NEVER output JSON, XML, <UpdateVariable>, <JSONPatch>, or code fences.`,
+    `1. Length requirement: total prose length MUST be within ${lowChars}-${highChars} characters. Use vivid scene atmosphere, dialogue, action choreography, and inner monologue to fill the turn naturally, scattering the ${picked.length} mutations evenly across the beginning, middle, and end (never dump a dry bullet summary).`,
+    `2. Every single fact, exact number, item/skill/quest/NPC name, and duration in the list MUST appear naturally in the story prose.`,
+    `3. NEVER invent extra side effects: no unrequested free items, no extra gold/EXP/affection, no extra time skips, no unrequested HP/AP changes.`,
+    `4. Output ONLY pure story prose. NEVER output JSON, XML, <UpdateVariable>, <JSONPatch>, or code fences.`,
     ``,
     `[INITIAL STATE SUMMARY]`,
     stateSummary,
@@ -232,6 +232,7 @@ export function generateCase(preset, seed, options = {}) {
     presetName: preset.name,
     seed: Number(seed),
     k: picked.length,
+    storyChars,
     vectorIndices: picked.map((p) => p.opIndex),
     picked,
     baseStatData,
@@ -241,9 +242,9 @@ export function generateCase(preset, seed, options = {}) {
   };
 }
 
-/** Gate check on AI-A's synthesized story: catch missing numbers/names or leaked patch tags BEFORE testing AI-B. */
-export function verifyGeneratedStory(testCase, storyText) {
-  const txt = String(storyText || '');
+/** Gate check on AI-A's synthesized story: catch missing numbers/names, leaked patch tags, or undersized prose BEFORE testing AI-B. */
+export function verifyGeneratedStory(testCase, storyText, options = {}) {
+  const txt = String(storyText || '').trim();
   const missing = [];
   for (const op of testCase.picked) {
     for (const tok of op.requiredTokens) {
@@ -251,11 +252,17 @@ export function verifyGeneratedStory(testCase, storyText) {
     }
   }
   const hasLeakTag = /<UpdateVariable|<JSONPatch|\{"op"\s*:/i.test(txt);
+  const targetChars = Number(options.storyChars ?? testCase.storyChars ?? 2500);
+  const minLength = Math.max(60, Math.floor(targetChars * 0.72));
+  const tooShort = txt.length < minLength;
   return {
-    ok: missing.length === 0 && !hasLeakTag && txt.trim().length >= 60,
+    ok: missing.length === 0 && !hasLeakTag && !tooShort,
     missing,
     hasLeakTag,
-    length: txt.trim().length,
+    tooShort,
+    minLength,
+    targetChars,
+    length: txt.length,
   };
 }
 

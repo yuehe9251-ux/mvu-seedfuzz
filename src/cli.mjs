@@ -124,11 +124,13 @@ if (cmd === 'list-ops') {
 }
 
 if (cmd === 'gen') {
-  const tc = generateCase(preset, Number(args.seed || 1001), { k: Number(args.k || 4) });
+  const storyChars = Number(args['story-chars'] ?? 2500);
+  const tc = generateCase(preset, Number(args.seed || 1001), { k: Number(args.k || 4), storyChars });
   const payload = {
     presetName: tc.presetName,
     seed: tc.seed,
     k: tc.k,
+    storyChars: tc.storyChars,
     vectorIndices: tc.vectorIndices,
     picked: tc.picked.map((p) => ({ opIndex: p.opIndex, id: p.id, domain: p.domain, name: p.name, storyFact: p.storyFact, requiredTokens: p.requiredTokens })),
     storyPrompt: tc.storyPrompt,
@@ -143,8 +145,9 @@ if (cmd === 'gen') {
 
 if (cmd === 'check-story') {
   const story = fs.readFileSync(args['story-file'], 'utf8');
-  const tc = generateCase(preset, Number(args.seed || 1001), { k: Number(args.k || 4) });
-  const chk = verifyGeneratedStory(tc, story);
+  const storyChars = Number(args['story-chars'] ?? 2500);
+  const tc = generateCase(preset, Number(args.seed || 1001), { k: Number(args.k || 4), storyChars });
+  const chk = verifyGeneratedStory(tc, story, { storyChars });
   const contextChars = Math.max(0, Number(args['context-chars'] || 0));
   if (args['prompt-out']) {
     fs.mkdirSync(path.dirname(path.resolve(args['prompt-out'])), { recursive: true });
@@ -178,6 +181,7 @@ if (cmd === 'run') {
   const seeds = parseSeedList(args.seeds || '1001..1006');
   const longSeedSet = new Set(args['long-seeds'] ? parseSeedList(args['long-seeds']) : []);
   const defaultContextChars = Math.max(0, Number(args['context-chars'] || 0));
+  const storyChars = Number(args['story-chars'] ?? 2500);
   const k = Number(args.k || 4);
   const concurrency = Math.max(1, Math.min(12, Number(args.concurrency || 3)));
   const apiUrl = args['api-url'] || process.env.FUZZ_API_URL;
@@ -197,13 +201,13 @@ if (cmd === 'run') {
     while (cursor < seeds.length) {
       const idx = cursor++;
       const seed = seeds[idx];
-      const tc = generateCase(preset, seed, { k });
+      const tc = generateCase(preset, seed, { k, storyChars });
       let story = await callLLM({ apiUrl: storyUrl, apiKey: storyKey, model: storyModel, prompt: tc.storyPrompt, temperature: 0.4 });
-      let chk = verifyGeneratedStory(tc, story);
+      let chk = verifyGeneratedStory(tc, story, { storyChars });
       if (!chk.ok) {
-        const retryPrompt = `${tc.storyPrompt}\n\n[RETRY: previous draft failed check] missing=${JSON.stringify(chk.missing)}, hasLeakTag=${chk.hasLeakTag}. Rewrite pure story prose only.`;
+        const retryPrompt = `${tc.storyPrompt}\n\n[RETRY: previous draft failed check] length=${chk.length}, minLength=${chk.minLength}, tooShort=${chk.tooShort}, missing=${JSON.stringify(chk.missing)}, hasLeakTag=${chk.hasLeakTag}. Rewrite pure story prose of ~${storyChars} chars only.`;
         story = await callLLM({ apiUrl: storyUrl, apiKey: storyKey, model: storyModel, prompt: retryPrompt, temperature: 0.25 });
-        chk = verifyGeneratedStory(tc, story);
+        chk = verifyGeneratedStory(tc, story, { storyChars });
       }
       const seedCtxChars = longSeedSet.size > 0
         ? (longSeedSet.has(seed) ? (defaultContextChars || 55000) : 0)
@@ -240,6 +244,7 @@ if (cmd === 'compare') {
   const seeds = parseSeedList(args.seeds || '1001..1010');
   const longSeedSet = new Set(args['long-seeds'] ? parseSeedList(args['long-seeds']) : []);
   const defaultContextChars = Math.max(0, Number(args['context-chars'] || 0));
+  const storyChars = Number(args['story-chars'] ?? 2500);
   const k = Number(args.k || 4);
   const concurrency = Math.max(1, Math.min(12, Number(args.concurrency || 3)));
   const temperature = Number(args.temperature ?? 0);
@@ -272,20 +277,20 @@ if (cmd === 'compare') {
     while (prepCursor < seeds.length) {
       const idx = prepCursor++;
       const seed = seeds[idx];
-      const tc = generateCase(preset, seed, { k });
+      const tc = generateCase(preset, seed, { k, storyChars });
       const storyFile = storyDir ? path.join(storyDir, `story_${seed}.txt`) : null;
       let story = '';
       let chk = null;
       if (storyFile && fs.existsSync(storyFile)) {
         story = fs.readFileSync(storyFile, 'utf8');
-        chk = verifyGeneratedStory(tc, story);
+        chk = verifyGeneratedStory(tc, story, { storyChars });
       } else {
         story = await callLLM({ apiUrl: storyUrl, apiKey: storyKey, model: storyModel, prompt: tc.storyPrompt, temperature: 0.35 });
-        chk = verifyGeneratedStory(tc, story);
+        chk = verifyGeneratedStory(tc, story, { storyChars });
         if (!chk.ok) {
-          const retryPrompt = `${tc.storyPrompt}\n\n[RETRY: previous draft failed check] missing=${JSON.stringify(chk.missing)}, hasLeakTag=${chk.hasLeakTag}. Rewrite pure story prose only.`;
+          const retryPrompt = `${tc.storyPrompt}\n\n[RETRY: previous draft failed check] length=${chk.length}, minLength=${chk.minLength}, tooShort=${chk.tooShort}, missing=${JSON.stringify(chk.missing)}, hasLeakTag=${chk.hasLeakTag}. Rewrite pure story prose of ~${storyChars} chars only.`;
           story = await callLLM({ apiUrl: storyUrl, apiKey: storyKey, model: storyModel, prompt: retryPrompt, temperature: 0.2 });
-          chk = verifyGeneratedStory(tc, story);
+          chk = verifyGeneratedStory(tc, story, { storyChars });
         }
         if (storyFile) fs.writeFileSync(storyFile, story, 'utf8');
       }

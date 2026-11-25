@@ -24,6 +24,7 @@ preset = args.get("preset", os.path.join(repo_dir, "presets", "minimal-rpg.mjs")
 seeds = args.get("seeds", [1001, 1002, 1003, 1004, 1005, 1006])
 long_seeds = set(args.get("long_seeds", []))
 long_context_chars = int(args.get("long_context_chars", 55000))
+story_chars = int(args.get("story_chars", 2500))
 chunk_size = int(args.get("chunk_size", 26000))
 k = int(args.get("k", 4))
 story_model = args.get("story_model", "flash")
@@ -49,7 +50,7 @@ phase("1. Generate Deterministic Seed Cases")
 cases = []
 for s in seeds:
     case_path = os.path.join(out_dir, f"case_{s}.json")
-    run_cli(["gen", "--preset", preset, "--seed", str(s), "--k", str(k), "--out", case_path])
+    run_cli(["gen", "--preset", preset, "--seed", str(s), "--k", str(k), "--story-chars", str(story_chars), "--out", case_path])
     with open(case_path, "r", encoding="utf-8") as f:
         tc = json.load(f)
     cases.append(tc)
@@ -72,15 +73,15 @@ async def synthesize_story(tc):
         f.write(story)
     ctx_chars = long_context_chars if s in long_seeds else 0
     chk = json.loads(
-        run_cli(["check-story", "--preset", preset, "--seed", str(s), "--k", str(k), "--context-chars", str(ctx_chars), "--story-file", story_path, "--prompt-out", prompt_path])
+        run_cli(["check-story", "--preset", preset, "--seed", str(s), "--k", str(k), "--story-chars", str(story_chars), "--context-chars", str(ctx_chars), "--story-file", story_path, "--prompt-out", prompt_path])
     )
     if not chk.get("ok"):
-        fix_msg = f"Previous draft failed gate (missing={json.dumps(chk.get('missing', []), ensure_ascii=False)}, hasLeakTag={chk.get('hasLeakTag')}). Rewrite pure story prose only."
+        fix_msg = f"Previous draft failed gate (length={chk.get('length')}, minLength={chk.get('minLength')}, tooShort={chk.get('tooShort')}, missing={json.dumps(chk.get('missing', []), ensure_ascii=False)}, hasLeakTag={chk.get('hasLeakTag')}). Rewrite pure story prose of ~{story_chars} chars (at least {chk.get('minLength')} chars) with every listed fact embedded."
         story = await writer(fix_msg, {"type": "string"})
         with open(story_path, "w", encoding="utf-8") as f:
             f.write(story)
         chk = json.loads(
-            run_cli(["check-story", "--preset", preset, "--seed", str(s), "--k", str(k), "--context-chars", str(ctx_chars), "--story-file", story_path, "--prompt-out", prompt_path])
+            run_cli(["check-story", "--preset", preset, "--seed", str(s), "--k", str(k), "--story-chars", str(story_chars), "--context-chars", str(ctx_chars), "--story-file", story_path, "--prompt-out", prompt_path])
         )
     del writer
     with open(prompt_path, "r", encoding="utf-8") as f:

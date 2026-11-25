@@ -70,18 +70,24 @@ test('10 deterministic combo seeds (k=4) grade 100% with zero drift', () => {
   assert.ok(rep.markdown.includes('MVU-SeedFuzz Variable Vulnerability Heatmap'));
 });
 
-test('story gate catches missing tokens and leaked XML/JSON tags', () => {
+test('story gate catches missing tokens, leaked tags, and undersized stories (default 2500 chars)', () => {
   const tc = generateCase(minimalPreset, 1001, { k: 3 });
+  assert.equal(tc.storyChars, 2500);
   const badLeak = 'Aria walked into town <UpdateVariable><JSONPatch>[]</JSONPatch></UpdateVariable>';
   const chk1 = verifyGeneratedStory(tc, badLeak);
   assert.equal(chk1.ok, false);
   assert.equal(chk1.hasLeakTag, true);
 
-  const syntheticGood = tc.picked.map((p) => p.storyFact).join(' ') + ' '.padEnd(80, '.');
-  const chk2 = verifyGeneratedStory(tc, syntheticGood);
+  const shortProse = tc.picked.map((p) => p.storyFact).join(' ') + ' '.padEnd(120, '.');
+  const chkTooShort = verifyGeneratedStory(tc, shortProse);
+  assert.equal(chkTooShort.ok, false);
+  assert.equal(chkTooShort.tooShort, true);
+
+  const fullProse = shortProse + ' '.padEnd(2200, 'a');
+  const chk2 = verifyGeneratedStory(tc, fullProse);
   assert.equal(chk2.ok, true);
 
-  const blindPrompt = buildBlindUpdaterPrompt(minimalPreset, tc, syntheticGood);
+  const blindPrompt = buildBlindUpdaterPrompt(minimalPreset, tc, fullProse);
   assert.ok(!blindPrompt.includes('expectedPatches'));
   assert.ok(blindPrompt.includes('CURRENT stat_data'));
 });
