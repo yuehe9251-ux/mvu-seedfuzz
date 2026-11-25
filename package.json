@@ -1,0 +1,38 @@
+{
+  "name": "mvu-seedfuzz",
+  "version": "0.1.0",
+  "description": "Seed-driven reverse-oracle variable fuzzing & vulnerability heatmap framework for SillyTavern / MVU / AI RP character cards.",
+  "type": "module",
+  "main": "src/engine.mjs",
+  "bin": {
+    "mvu-seedfuzz": "./src/cli.mjs"
+  },
+  "scripts": {
+    "test": "node test/self-check.mjs",
+    "selftest": "node src/cli.mjs selftest --preset presets/minimal-rpg.mjs",
+    "list-ops": "node src/cli.mjs list-ops --preset presets/minimal-rpg.mjs"
+  },
+  "keywords": [
+    "sillytavern",
+    "mvu",
+    "ai-rp",
+    "roleplay",
+    "fuzzing",
+    "llm-eval",
+    "character-card",
+    "json-patch",
+    "benchmark"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Yuehe9251-UX/MVU-seedfuzz.git"
+  },
+  "homepage": "https://github.com/Yuehe9251-UX/MVU-seedfuzz#readme",
+  "bugs": {
+    "url": "https://github.com/Yuehe9251-UX/MVU-seedfuzz/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
