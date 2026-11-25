@@ -75,10 +75,11 @@ node src/cli.mjs selftest --preset presets/<user-card>.mjs
 
 ---
 
-## 3. Long-Context Stress Testing (Optional, Recommended for Main-Model Cards)
+## 3. Long-Context & A/B Relay Auditing (Optional)
 - For cards used in **single-model full-history mode** (or Extra-Model mode with long chat history enabled), pass `--long-seeds` + `--context-chars 55000` (CLI) or `long_seeds` + `long_context_chars: 55000` (`workflows/antigravity_fuzz.py`).
 - `workflows/antigravity_fuzz.py` automatically chunks prompts over 42,000 chars into stateful multi-turn sessions (`chunk_size=26000`) so zero bytes are truncated by single-message caps.
 - Optionally implement `preset.buildHistoryFiller(seed, targetChars)` to inject world-accurate settled prior turns with realistic numerical distractors.
+- To audit a third-party relay API vs an official baseline (detecting silent model downgrade, context truncation, or stripped prefix caching), use `node src/cli.mjs compare --story-dir <frozen-dir> --temperature 0 --baseline-url ... --candidate-url ...`.
 
 ---
 

@@ -104,6 +104,29 @@ node src/cli.mjs run \
 > - 同样支持环境变量 `FUZZ_API_URL` / `FUZZ_API_KEY` / `FUZZ_MODEL`，以及 Google Gemini 原生 `generateContent` 接口。
 > - **标准组 vs 长上下文组对照**：不带 `--context-chars` 时对应酒馆「**额外模型解析变量**（仅传规则 + `stat_data` + 最新正文）」；开启 `--long-seeds` + `--context-chars 55000` 则会在规则与当前状态之间注入拟真已结算历史前情与旧数值干扰项，对应「**主模型一体直出** / 携带长对话历史」时的抗遗忘与防旧数字串台压测（Antigravity 工作流超 4.2 万字时自动切换多轮分段投喂，零截断）。
 
+### 4. 双端点同题 A/B 测中转 API 是否“掺水 / 截断 / 吞缓存”（`compare`）
+相比容易被白名单绕过的短智力题，`compare` 会先冻结一套一字不差的复杂 RP 盲测题库（`--story-dir` 可反复复用给多个中转站），在 `--temperature 0` 下同时喂给**官方直连（Baseline）**与**待测中转（Candidate）**，自动输出标准/长上下文命中率差值、JSON 报错率、P95 延迟与前缀缓存命中率对比：
+
+```bash
+node src/cli.mjs compare \
+  --preset presets/minimal-rpg.mjs \
+  --seeds 1001..1020 \
+  --long-seeds 1015..1020 \
+  --context-chars 55000 \
+  --k 4 \
+  --temperature 0 \
+  --story-dir ./frozen-stories \
+  --baseline-url https://api.deepseek.com/chat/completions \
+  --baseline-key YOUR_OFFICIAL_KEY \
+  --baseline-model deepseek-chat \
+  --candidate-url https://relay.example.com/v1/chat/completions \
+  --candidate-key YOUR_RELAY_KEY \
+  --candidate-model deepseek-chat \
+  --md-out compare-report.md \
+  --json-out compare-report.json
+```
+自动检测并输出客观告警信号：`LONG_CONTEXT_TRUNCATION_SUSPECT`（疑似暗中截断长上下文）、`ACCURACY_DEGRADATION_SUSPECT`（同题命中率显著下降）、`FORMAT_INSTABILITY_SUSPECT`（JSON 语法崩溃率升高）、`CACHE_BYPASS_SUSPECT`（前缀缓存疑似未透传）或 `CONSISTENT_WITH_BASELINE`（与基线一致）。
+
 ---
 
 ## 如何更换为你自己的变量框架

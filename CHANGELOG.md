@@ -2,6 +2,14 @@
 
 All notable changes to **MVU-SeedFuzz** will be documented in this file.
 
+## [0.2.0] - 2026-11-26
+
+### Added
+- **A/B Endpoint & Relay Audit (`mvu-seedfuzz compare`)**: Evaluates two API endpoints (e.g., Official Direct API vs Third-Party Relay / Candidate Model) on **byte-for-byte identical frozen blind prompts** (`--story-dir`, default `--temperature 0`) across both Standard and Long-Context seeds.
+- **Automated Objective Diagnostics (`buildCompareReport`)**: Computes side-by-side Standard/Long-Context hit rates, JSON parse failure rates, untouched-domain drift, avg/P95 latency, and multi-provider prefix cache hit rates, emitting clear signals (`LONG_CONTEXT_TRUNCATION_SUSPECT`, `ACCURACY_DEGRADATION_SUSPECT`, `FORMAT_INSTABILITY_SUSPECT`, `CACHE_BYPASS_SUSPECT`, or `CONSISTENT_WITH_BASELINE`) plus a per-seed divergence table.
+- **Multi-Provider Cache & Latency Telemetry (`callLLMWithMeta` in `src/providers.mjs`)**: Automatically normalizes prompt/completion/prefix-cache tokens across DeepSeek (`prompt_cache_hit_tokens`), OpenAI (`prompt_tokens_details.cached_tokens`), Anthropic (`cache_read_input_tokens`), and Gemini (`cachedContentTokenCount`).
+- **Local Mock HTTP End-to-End Test**: Expanded `test/self-check.mjs` to 12 tests, including a live local dual-server A/B test verifying detection of silent long-context truncation and cache stripping.
+
 ## [0.1.2] - 2026-11-26
 
 ### Added

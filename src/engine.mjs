@@ -447,3 +447,189 @@ export function buildHeatmapReport(results, meta = {}) {
     markdown: lines.join('\n'),
   };
 }
+
+function summarizeEndpointResults(results) {
+  const arr = Array.isArray(results) ? results : [];
+  const calcGroup = (sub) => {
+    const seeds = sub.length;
+    const fullPassSeeds = sub.filter((r) => r.allPassed).length;
+    const totalOps = sub.reduce((s, r) => s + Number(r.totalOps || 0), 0);
+    const totalPass = sub.reduce((s, r) => s + Number(r.passedOps || 0), 0);
+    const hitRatePct = totalOps ? Math.round((totalPass * 1000) / totalOps) / 10 : 0;
+    return { seeds, fullPassSeeds, totalOps, totalPass, hitRatePct };
+  };
+  const all = calcGroup(arr);
+  const standard = calcGroup(arr.filter((r) => !r.isLongContext));
+  const longContext = calcGroup(arr.filter((r) => !!r.isLongContext));
+
+  const parseFails = arr.filter((r) => !r.parseOk).length;
+  const parseFailRatePct = arr.length ? Math.round((parseFails * 1000) / arr.length) / 10 : 0;
+  const driftSeeds = arr.filter((r) => (r.driftWarnings || []).length > 0).length;
+
+  const latencies = arr.map((r) => Number(r.elapsedMs || 0)).filter((x) => x > 0).sort((a, b) => a - b);
+  const avgLatencyMs = latencies.length ? Math.round(latencies.reduce((s, x) => s + x, 0) / latencies.length) : 0;
+  const p95LatencyMs = latencies.length ? latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * 0.95))] : 0;
+
+  const promptTokens = arr.reduce((s, r) => s + Number(r.usage?.promptTokens ?? r.usage?.prompt_tokens ?? 0), 0);
+  const completionTokens = arr.reduce((s, r) => s + Number(r.usage?.completionTokens ?? r.usage?.completion_tokens ?? 0), 0);
+  const cacheHitTokens = arr.reduce((s, r) => s + Number(r.usage?.cacheHitTokens ?? r.usage?.prompt_cache_hit_tokens ?? 0), 0);
+  const cacheHitRatePct = promptTokens ? Math.round((cacheHitTokens * 1000) / promptTokens) / 10 : 0;
+
+  return {
+    ...all,
+    standard,
+    longContext,
+    parseFails,
+    parseFailRatePct,
+    driftSeeds,
+    avgLatencyMs,
+    p95LatencyMs,
+    promptTokens,
+    completionTokens,
+    cacheHitTokens,
+    cacheHitRatePct,
+  };
+}
+
+/**
+ * Compare two endpoints (e.g., Official Direct API vs Third-Party Relay / Candidate Model)
+ * evaluated on the exact same frozen seeds & blind prompts.
+ * Produces objective accuracy, long-context retention, format stability, latency & cache-passthrough diagnostics.
+ */
+export function buildCompareReport(baselineResults, candidateResults, meta = {}) {
+  const baseLabel = meta.baselineLabel || 'Baseline (Official)';
+  const candLabel = meta.candidateLabel || 'Candidate (Relay)';
+  const base = summarizeEndpointResults(baselineResults);
+  const cand = summarizeEndpointResults(candidateResults);
+
+  const r1 = (n) => Math.round(n * 10) / 10;
+  const fmtDelta = (d, unit = '%') => `${d >= 0 ? '+' : ''}${r1(d)}${unit}`;
+
+  const hitDelta = r1(cand.hitRatePct - base.hitRatePct);
+  const stdDelta = base.standard.seeds && cand.standard.seeds ? r1(cand.standard.hitRatePct - base.standard.hitRatePct) : null;
+  const longDelta = base.longContext.seeds && cand.longContext.seeds ? r1(cand.longContext.hitRatePct - base.longContext.hitRatePct) : null;
+  const parseFailDelta = r1(cand.parseFailRatePct - base.parseFailRatePct);
+  const cacheDelta = r1(cand.cacheHitRatePct - base.cacheHitRatePct);
+
+  const flags = [];
+  if (longDelta !== null && longDelta <= -20) {
+    flags.push({
+      code: 'LONG_CONTEXT_TRUNCATION_SUSPECT',
+      severity: 'HIGH',
+      message: `Long-context hit rate dropped ${fmtDelta(longDelta)} (${base.longContext.hitRatePct}% -> ${cand.longContext.hitRatePct}%). Strongly suggests silent context truncation or severe long-context degradation.`,
+    });
+  } else if (
+    cand.longContext.seeds > 0
+    && cand.standard.seeds > 0
+    && (cand.standard.hitRatePct - cand.longContext.hitRatePct) >= 25
+    && (base.standard.hitRatePct - base.longContext.hitRatePct) < 10
+  ) {
+    flags.push({
+      code: 'LONG_CONTEXT_TRUNCATION_SUSPECT',
+      severity: 'HIGH',
+      message: `Candidate dropped ${r1(cand.standard.hitRatePct - cand.longContext.hitRatePct)}% from standard to long-context while baseline stayed stable.`,
+    });
+  }
+
+  if (hitDelta <= -10) {
+    flags.push({
+      code: 'ACCURACY_DEGRADATION_SUSPECT',
+      severity: 'HIGH',
+      message: `Overall atomic variable hit rate is ${fmtDelta(hitDelta)} below baseline (${base.hitRatePct}% -> ${cand.hitRatePct}%) on identical prompts. Suspect model downgrade, parameter tampering, or prompt mutation.`,
+    });
+  }
+
+  if (parseFailDelta >= 10) {
+    flags.push({
+      code: 'FORMAT_INSTABILITY_SUSPECT',
+      severity: 'MEDIUM',
+      message: `JSONPatch parse failure rate rose ${fmtDelta(parseFailDelta)} (${base.parseFailRatePct}% -> ${cand.parseFailRatePct}%).`,
+    });
+  }
+
+  if (base.cacheHitRatePct >= 30 && (cand.cacheHitRatePct === 0 || cacheDelta <= -25)) {
+    flags.push({
+      code: 'CACHE_BYPASS_SUSPECT',
+      severity: 'MEDIUM',
+      message: `Baseline achieved ${base.cacheHitRatePct}% prefix cache hit rate vs candidate ${cand.cacheHitRatePct}%. Suspect unforwarded prefix caching or injected prompt modifications.`,
+    });
+  }
+
+  if (!flags.length) {
+    flags.push({
+      code: 'CONSISTENT_WITH_BASELINE',
+      severity: 'OK',
+      message: 'No statistically notable degradation detected across accuracy, long-context retention, JSON format stability, or prefix caching.',
+    });
+  }
+
+  const baseBySeed = new Map((baselineResults || []).map((r) => [r.seed, r]));
+  const candBySeed = new Map((candidateResults || []).map((r) => [r.seed, r]));
+  const allSeeds = Array.from(new Set([...baseBySeed.keys(), ...candBySeed.keys()])).sort((a, b) => a - b);
+
+  const seedDiffRows = [];
+  for (const s of allSeeds) {
+    const b = baseBySeed.get(s);
+    const c = candBySeed.get(s);
+    if (!b || !c) continue;
+    if (b.passedOps !== c.passedOps || b.parseOk !== c.parseOk || b.allPassed !== c.allPassed) {
+      const mode = b.isLongContext ? 'LONG' : 'STD';
+      const bTag = b.parseOk ? `${b.passedOps}/${b.totalOps}` : 'PARSE_ERR';
+      const cTag = c.parseOk ? `${c.passedOps}/${c.totalOps}` : 'PARSE_ERR';
+      const cFails = (c.opResults || []).filter((x) => !x.ok).map((x) => `${x.id}(${x.detail})`).join('; ') || '—';
+      seedDiffRows.push(`| ${s} | ${mode} | ${bTag} | ${cTag} | ${cFails} |`);
+    }
+  }
+
+  const title = meta.title || 'MVU-SeedFuzz A/B Endpoint Audit Report';
+  const lines = [
+    `# ${title}`,
+    ``,
+    `- **Baseline**: \`${baseLabel}\``,
+    `- **Candidate**: \`${candLabel}\``,
+    `- **Matched Seeds**: **${allSeeds.length}** (Standard: **${base.standard.seeds}**, Long-Context: **${base.longContext.seeds}**)`,
+    ``,
+    `## 1. Side-by-Side Metrics`,
+    ``,
+    `| Metric | ${baseLabel} | ${candLabel} | Delta (Cand - Base) |`,
+    `| :--- | :---: | :---: | :---: |`,
+    `| All-Pass Seeds | ${base.fullPassSeeds}/${base.seeds} | ${cand.fullPassSeeds}/${cand.seeds} | ${cand.fullPassSeeds - base.fullPassSeeds >= 0 ? '+' : ''}${cand.fullPassSeeds - base.fullPassSeeds} |`,
+    `| Overall Atomic Hit Rate | **${base.hitRatePct}%** (${base.totalPass}/${base.totalOps}) | **${cand.hitRatePct}%** (${cand.totalPass}/${cand.totalOps}) | **${fmtDelta(hitDelta)}** |`,
+    stdDelta !== null
+      ? `| Standard Context Hit Rate | ${base.standard.hitRatePct}% (${base.standard.totalPass}/${base.standard.totalOps}) | ${cand.standard.hitRatePct}% (${cand.standard.totalPass}/${cand.standard.totalOps}) | ${fmtDelta(stdDelta)} |`
+      : null,
+    longDelta !== null
+      ? `| Long-Context Hit Rate | ${base.longContext.hitRatePct}% (${base.longContext.totalPass}/${base.longContext.totalOps}) | ${cand.longContext.hitRatePct}% (${cand.longContext.totalPass}/${cand.longContext.totalOps}) | **${fmtDelta(longDelta)}** |`
+      : null,
+    `| JSON Parse Failure Rate | ${base.parseFailRatePct}% (${base.parseFails}/${base.seeds}) | ${cand.parseFailRatePct}% (${cand.parseFails}/${cand.seeds}) | ${fmtDelta(parseFailDelta)} |`,
+    `| Untouched-Domain Drift Seeds | ${base.driftSeeds}/${base.seeds} | ${cand.driftSeeds}/${cand.seeds} | ${cand.driftSeeds - base.driftSeeds >= 0 ? '+' : ''}${cand.driftSeeds - base.driftSeeds} |`,
+    `| Avg / P95 Latency | ${base.avgLatencyMs}ms / ${base.p95LatencyMs}ms | ${cand.avgLatencyMs}ms / ${cand.p95LatencyMs}ms | ${fmtDelta(cand.avgLatencyMs - base.avgLatencyMs, 'ms')} |`,
+    `| Prefix Cache Hit Rate | ${base.cacheHitRatePct}% (${base.cacheHitTokens}/${base.promptTokens}) | ${cand.cacheHitRatePct}% (${cand.cacheHitTokens}/${cand.promptTokens}) | ${fmtDelta(cacheDelta)} |`,
+    ``,
+    `## 2. Automated Diagnostic Signals`,
+    ``,
+    ...flags.map((f) => {
+      const icon = f.severity === 'HIGH' ? '🔴' : (f.severity === 'MEDIUM' ? '🟡' : '🟢');
+      return `- ${icon} **\`${f.code}\`**: ${f.message}`;
+    }),
+    ``,
+    `## 3. Divergent Seeds (Baseline ≠ Candidate)`,
+    ``,
+  ].filter((x) => x !== null);
+
+  if (seedDiffRows.length) {
+    lines.push('| Seed | Mode | Baseline | Candidate | Candidate Diagnostics |');
+    lines.push('| :---: | :---: | :---: | :---: | :--- |');
+    lines.push(...seedDiffRows);
+  } else {
+    lines.push('_Zero divergent seeds — both endpoints achieved identical pass/fail scores on every seed._');
+  }
+
+  return {
+    baseline: base,
+    candidate: cand,
+    deltas: { hitDelta, stdDelta, longDelta, parseFailDelta, cacheDelta },
+    flags,
+    markdown: lines.join('\n'),
+  };
+}

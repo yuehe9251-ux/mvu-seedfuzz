@@ -22,8 +22,9 @@ import {
   buildBlindUpdaterPrompt,
   gradeUpdaterOutput,
   buildHeatmapReport,
+  buildCompareReport,
 } from './engine.mjs';
-import { callLLM } from './providers.mjs';
+import { callLLM, callLLMWithMeta } from './providers.mjs';
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -81,6 +82,7 @@ Usage:
   mvu-seedfuzz grade        --seed 1001 --k 4 --output-file out.txt [--preset ...]
   mvu-seedfuzz report       --results-file results.json [--md-out heatmap.md]
   mvu-seedfuzz run          --seeds 1001..1010 [--long-seeds 1008..1010 --context-chars 55000] --k 4 --api-url <url> --api-key <key> --model <name> [--preset ...] [--concurrency 3] [--md-out heatmap.md]
+  mvu-seedfuzz compare      --seeds 1001..1020 [--long-seeds 1015..1020 --context-chars 55000] --k 4 --baseline-url <url> --baseline-key <key> --baseline-model <name> --candidate-url <url> --candidate-key <key> --candidate-model <name> [--story-dir ./stories] [--temperature 0] [--md-out compare.md]
 `);
   process.exit(0);
 }
@@ -205,14 +207,16 @@ if (cmd === 'run') {
         ? (longSeedSet.has(seed) ? (defaultContextChars || 55000) : 0)
         : defaultContextChars;
       const blindPrompt = buildBlindUpdaterPrompt(preset, tc, story, { ...args, contextChars: seedCtxChars });
-      const updOut = await callLLM({ apiUrl, apiKey, model, prompt: blindPrompt, temperature: 0.1 });
-      const g = gradeUpdaterOutput(preset, tc, updOut);
+      const resp = await callLLMWithMeta({ apiUrl, apiKey, model, prompt: blindPrompt, temperature: Number(args.temperature ?? 0.1) });
+      const g = gradeUpdaterOutput(preset, tc, resp.content);
       g.storyValid = chk.ok;
       g.isLongContext = seedCtxChars > 0;
       g.promptChars = blindPrompt.length;
+      g.elapsedMs = resp.elapsedMs;
+      g.usage = resp.usage;
       results[idx] = g;
       const modeTag = g.isLongContext ? `LONG(${g.promptChars}c)` : `STD(${g.promptChars}c)`;
-      console.log(`[SEED ${seed}] [${modeTag}] storyOk=${chk.ok} passed=${g.passedOps}/${g.totalOps} drift=${g.driftWarnings.length}`);
+      console.log(`[SEED ${seed}] [${modeTag}] storyOk=${chk.ok} passed=${g.passedOps}/${g.totalOps} drift=${g.driftWarnings.length} ${resp.elapsedMs}ms cacheHit=${resp.usage.cacheHitTokens}`);
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, seeds.length) }, () => worker()));
@@ -227,6 +231,110 @@ if (cmd === 'run') {
     fs.writeFileSync(args['md-out'], rep.markdown, 'utf8');
   }
   console.log('\n' + rep.markdown);
+  process.exit(0);
+}
+
+if (cmd === 'compare') {
+  const seeds = parseSeedList(args.seeds || '1001..1010');
+  const longSeedSet = new Set(args['long-seeds'] ? parseSeedList(args['long-seeds']) : []);
+  const defaultContextChars = Math.max(0, Number(args['context-chars'] || 0));
+  const k = Number(args.k || 4);
+  const concurrency = Math.max(1, Math.min(12, Number(args.concurrency || 3)));
+  const temperature = Number(args.temperature ?? 0);
+
+  const baseUrl = args['baseline-url'] || process.env.FUZZ_BASELINE_URL;
+  const baseKey = args['baseline-key'] || process.env.FUZZ_BASELINE_KEY || '';
+  const baseModel = args['baseline-model'] || process.env.FUZZ_BASELINE_MODEL || args.model;
+  const baseLabel = args['baseline-label'] || `Baseline (${baseModel || 'official'})`;
+
+  const candUrl = args['candidate-url'] || process.env.FUZZ_CANDIDATE_URL;
+  const candKey = args['candidate-key'] || process.env.FUZZ_CANDIDATE_KEY || '';
+  const candModel = args['candidate-model'] || process.env.FUZZ_CANDIDATE_MODEL || baseModel;
+  const candLabel = args['candidate-label'] || `Candidate (${candModel || 'relay'})`;
+
+  const storyUrl = args['story-api-url'] || process.env.FUZZ_STORY_API_URL || baseUrl;
+  const storyKey = args['story-api-key'] || process.env.FUZZ_STORY_API_KEY || baseKey;
+  const storyModel = args['story-model'] || process.env.FUZZ_STORY_MODEL || baseModel;
+  const storyDir = args['story-dir'] ? path.resolve(args['story-dir']) : null;
+
+  if (!baseUrl || !candUrl) {
+    console.error('Error: both --baseline-url and --candidate-url are required for `compare`.');
+    process.exit(2);
+  }
+  if (storyDir) fs.mkdirSync(storyDir, { recursive: true });
+
+  // Phase 1: Prepare ONE frozen, byte-for-byte identical blindPrompt per seed
+  const bundles = new Array(seeds.length);
+  let prepCursor = 0;
+  async function prepWorker() {
+    while (prepCursor < seeds.length) {
+      const idx = prepCursor++;
+      const seed = seeds[idx];
+      const tc = generateCase(preset, seed, { k });
+      const storyFile = storyDir ? path.join(storyDir, `story_${seed}.txt`) : null;
+      let story = '';
+      let chk = null;
+      if (storyFile && fs.existsSync(storyFile)) {
+        story = fs.readFileSync(storyFile, 'utf8');
+        chk = verifyGeneratedStory(tc, story);
+      } else {
+        story = await callLLM({ apiUrl: storyUrl, apiKey: storyKey, model: storyModel, prompt: tc.storyPrompt, temperature: 0.35 });
+        chk = verifyGeneratedStory(tc, story);
+        if (!chk.ok) {
+          const retryPrompt = `${tc.storyPrompt}\n\n[RETRY: previous draft failed check] missing=${JSON.stringify(chk.missing)}, hasLeakTag=${chk.hasLeakTag}. Rewrite pure story prose only.`;
+          story = await callLLM({ apiUrl: storyUrl, apiKey: storyKey, model: storyModel, prompt: retryPrompt, temperature: 0.2 });
+          chk = verifyGeneratedStory(tc, story);
+        }
+        if (storyFile) fs.writeFileSync(storyFile, story, 'utf8');
+      }
+      const seedCtxChars = longSeedSet.size > 0
+        ? (longSeedSet.has(seed) ? (defaultContextChars || 55000) : 0)
+        : defaultContextChars;
+      const blindPrompt = buildBlindUpdaterPrompt(preset, tc, story, { ...args, contextChars: seedCtxChars });
+      bundles[idx] = { seed, tc, storyValid: chk.ok, isLongContext: seedCtxChars > 0, blindPrompt };
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, seeds.length) }, () => prepWorker()));
+
+  // Phase 2: Evaluate Baseline & Candidate on the EXACT same frozen prompts
+  async function evalEndpoint(tag, apiUrl, apiKey, model) {
+    const out = new Array(bundles.length);
+    let cursor = 0;
+    async function w() {
+      while (cursor < bundles.length) {
+        const idx = cursor++;
+        const b = bundles[idx];
+        const resp = await callLLMWithMeta({ apiUrl, apiKey, model, prompt: b.blindPrompt, temperature });
+        const g = gradeUpdaterOutput(preset, b.tc, resp.content);
+        g.storyValid = b.storyValid;
+        g.isLongContext = b.isLongContext;
+        g.promptChars = b.blindPrompt.length;
+        g.elapsedMs = resp.elapsedMs;
+        g.usage = resp.usage;
+        out[idx] = g;
+        const modeTag = b.isLongContext ? `LONG(${b.blindPrompt.length}c)` : `STD(${b.blindPrompt.length}c)`;
+        console.log(`[${tag} SEED ${b.seed}] [${modeTag}] passed=${g.passedOps}/${g.totalOps} parseOk=${g.parseOk} drift=${g.driftWarnings.length} ${resp.elapsedMs}ms cacheHit=${resp.usage.cacheHitTokens}`);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, bundles.length) }, () => w()));
+    return out;
+  }
+
+  const [baselineResults, candidateResults] = await Promise.all([
+    evalEndpoint('BASELINE', baseUrl, baseKey, baseModel),
+    evalEndpoint('CANDIDATE', candUrl, candKey, candModel),
+  ]);
+
+  const cmp = buildCompareReport(baselineResults, candidateResults, { baselineLabel: baseLabel, candidateLabel: candLabel });
+  if (args['json-out']) {
+    fs.mkdirSync(path.dirname(path.resolve(args['json-out'])), { recursive: true });
+    fs.writeFileSync(args['json-out'], JSON.stringify({ meta: { baseLabel, candLabel, seeds, temperature }, ...cmp, baselineResults, candidateResults }, null, 2), 'utf8');
+  }
+  if (args['md-out']) {
+    fs.mkdirSync(path.dirname(path.resolve(args['md-out'])), { recursive: true });
+    fs.writeFileSync(args['md-out'], cmp.markdown, 'utf8');
+  }
+  console.log('\n' + cmp.markdown);
   process.exit(0);
 }
 

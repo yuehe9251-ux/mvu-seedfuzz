@@ -95,6 +95,29 @@ node src/cli.mjs run \
 ```
 > **Standard vs Long-Context**: Standard seeds model SillyTavern **Extra-Model variable parsing** (rules + `stat_data` + latest turn only). Adding `--long-seeds` + `--context-chars 55000` injects settled prior-turn RP history packed with numerical distractors between the rules and `stat_data`, benchmarking **Main-Model full-history** rule recall & bleed-through resistance (Antigravity workflow auto-chunks >42k-char prompts into multi-turn sessions for zero truncation). You can override the filler via `preset.buildHistoryFiller(seed, targetChars)`.
 
+### A/B Endpoint & Third-Party Relay Audit (`compare`)
+Audit whether a third-party relay silently downgrades models, truncates long contexts, or strips prefix caching by running **byte-for-byte identical frozen prompts** (`--story-dir`, `--temperature 0`) against an Official Baseline and a Candidate Relay:
+
+```bash
+node src/cli.mjs compare \
+  --preset presets/minimal-rpg.mjs \
+  --seeds 1001..1020 \
+  --long-seeds 1015..1020 \
+  --context-chars 55000 \
+  --k 4 \
+  --temperature 0 \
+  --story-dir ./frozen-stories \
+  --baseline-url https://api.deepseek.com/chat/completions \
+  --baseline-key YOUR_OFFICIAL_KEY \
+  --baseline-model deepseek-chat \
+  --candidate-url https://relay.example.com/v1/chat/completions \
+  --candidate-key YOUR_RELAY_KEY \
+  --candidate-model deepseek-chat \
+  --md-out compare-report.md \
+  --json-out compare-report.json
+```
+Automatically reports side-by-side Standard/Long-Context hit rates, JSON parse failure rates, avg/P95 latency, multi-provider prefix cache hit rates, divergent seeds, and objective diagnostic signals (`LONG_CONTEXT_TRUNCATION_SUSPECT`, `ACCURACY_DEGRADATION_SUSPECT`, `FORMAT_INSTABILITY_SUSPECT`, `CACHE_BYPASS_SUSPECT`, or `CONSISTENT_WITH_BASELINE`).
+
 ---
 
 ## Replacing with Your Own Variable Framework
