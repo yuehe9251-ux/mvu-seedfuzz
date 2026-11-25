@@ -22,6 +22,7 @@
  */
 
 export function deepClone(x) {
+  if (x === undefined || x === null) return x;
   return JSON.parse(JSON.stringify(x));
 }
 
@@ -104,6 +105,10 @@ export function applyMvuPatches(baseObj, patches) {
       parent[lastKey] = cur + dv;
       applied++;
     } else if (op === 'add' || op === 'replace' || op === 'set' || op === 'insert') {
+      if (p.value === undefined) {
+        errors.push(`#${i}: missing value at "${p.path}"`);
+        continue;
+      }
       parent[lastKey] = deepClone(p.value);
       applied++;
     } else if (op === 'remove' || op === 'delete') {
