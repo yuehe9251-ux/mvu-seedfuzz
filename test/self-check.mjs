@@ -20,6 +20,7 @@ import {
   gradeUpdaterOutput,
   buildHeatmapReport,
   buildCompareReport,
+  computeVerifiableReward,
 } from '../src/engine.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -259,6 +260,45 @@ await test('CLI `compare` end-to-end against local mock baseline vs context-trun
   } finally {
     baseSrv.srv.close();
     candSrv.srv.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+await test('computeVerifiableReward and CLI `export-rlvr` emit RFT/GRPO JSONL datasets', async () => {
+  assert.equal(computeVerifiableReward({ parseOk: false, passedOps: 0, totalOps: 4, driftWarnings: [], patchErrors: [] }).reward, -0.5);
+  const perfect = computeVerifiableReward({ parseOk: true, allPassed: true, passedOps: 4, totalOps: 4, driftWarnings: [], patchErrors: [] });
+  assert.equal(perfect.reward, 1.0);
+  assert.equal(perfect.acceptedForRFT, true);
+  const drifted = computeVerifiableReward({ parseOk: true, allPassed: false, passedOps: 2, totalOps: 4, driftWarnings: ['x'], patchErrors: [] });
+  assert.equal(drifted.acceptedForRFT, false);
+  assert.ok(drifted.reward < 0.2);
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mvu-seedfuzz-rlvr-'));
+  try {
+    const fakeResults = [
+      { seed: 8001, parseOk: true, allPassed: true, passedOps: 4, totalOps: 4, driftWarnings: [], patchErrors: [], isLongContext: false },
+      { seed: 8002, parseOk: false, allPassed: false, passedOps: 0, totalOps: 4, driftWarnings: [], patchErrors: [], isLongContext: true },
+    ];
+    const resFile = path.join(tmpDir, 'results.json');
+    fs.writeFileSync(resFile, JSON.stringify(fakeResults), 'utf8');
+    fs.writeFileSync(path.join(tmpDir, 'blind_prompt_8001.txt'), 'PROMPT_8001', 'utf8');
+    fs.writeFileSync(path.join(tmpDir, 'updater_out_8001.txt'), '<UpdateVariable><JSONPatch>[]</JSONPatch></UpdateVariable>', 'utf8');
+    fs.writeFileSync(path.join(tmpDir, 'blind_prompt_8002.txt'), 'PROMPT_8002', 'utf8');
+    fs.writeFileSync(path.join(tmpDir, 'updater_out_8002.txt'), 'BROKEN_OUTPUT', 'utf8');
+
+    const allOut = path.join(tmpDir, 'all.jsonl');
+    const rftOut = path.join(tmpDir, 'rft.jsonl');
+    await execFileAsync(process.execPath, [path.resolve('src/cli.mjs'), 'export-rlvr', '--results-file', resFile, '--prompt-dir', tmpDir, '--out', allOut]);
+    await execFileAsync(process.execPath, [path.resolve('src/cli.mjs'), 'export-rlvr', '--results-file', resFile, '--prompt-dir', tmpDir, '--out', rftOut, '--rft-only']);
+
+    const allLines = fs.readFileSync(allOut, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const rftLines = fs.readFileSync(rftOut, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.equal(allLines.length, 2);
+    assert.equal(allLines[0].reward, 1.0);
+    assert.equal(allLines[1].reward, -0.5);
+    assert.equal(rftLines.length, 1);
+    assert.equal(rftLines[0].seed, 8001);
+  } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

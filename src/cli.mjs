@@ -23,6 +23,7 @@ import {
   gradeUpdaterOutput,
   buildHeatmapReport,
   buildCompareReport,
+  computeVerifiableReward,
 } from './engine.mjs';
 import { callLLM, callLLMWithMeta } from './providers.mjs';
 
@@ -83,11 +84,12 @@ Usage:
   mvu-seedfuzz report       --results-file results.json [--md-out heatmap.md]
   mvu-seedfuzz run          --seeds 1001..1010 [--long-seeds 1008..1010 --context-chars 55000] --k 4 --api-url <url> --api-key <key> --model <name> [--preset ...] [--concurrency 3] [--md-out heatmap.md]
   mvu-seedfuzz compare      --seeds 1001..1020 [--long-seeds 1015..1020 --context-chars 55000] --k 4 --baseline-url <url> --baseline-key <key> --baseline-model <name> --candidate-url <url> --candidate-key <key> --candidate-model <name> [--story-dir ./stories] [--temperature 0] [--md-out compare.md]
+  mvu-seedfuzz export-rlvr  --results-file results.json --prompt-dir ./run_dir --output-dir ./run_dir --out train.jsonl [--rft-only] [--prompt-prefix blind_prompt_] [--output-prefix updater_out_]
 `);
   process.exit(0);
 }
 
-const preset = cmd === 'report' ? null : await loadPreset(args.preset);
+const preset = (cmd === 'report' || cmd === 'export-rlvr') ? null : await loadPreset(args.preset);
 
 if (cmd === 'selftest') {
   const base = typeof preset.runOracle === 'function' ? preset.runOracle(preset.createBaseState(), 1) : preset.createBaseState();
@@ -335,6 +337,58 @@ if (cmd === 'compare') {
     fs.writeFileSync(args['md-out'], cmp.markdown, 'utf8');
   }
   console.log('\n' + cmp.markdown);
+  process.exit(0);
+}
+
+if (cmd === 'export-rlvr') {
+  const resultsFile = args['results-file'];
+  const promptDir = args['prompt-dir'];
+  const outputDir = args['output-dir'] || promptDir;
+  const outFile = args.out;
+  if (!resultsFile || !promptDir || !outFile) {
+    console.error('Error: --results-file, --prompt-dir, and --out are required for `export-rlvr`.');
+    process.exit(2);
+  }
+  const promptPrefix = args['prompt-prefix'] || 'blind_prompt_';
+  const outputPrefix = args['output-prefix'] || 'updater_out_';
+  const rftOnly = Boolean(args['rft-only']);
+  const results = JSON.parse(fs.readFileSync(resultsFile, 'utf8'));
+  const lines = [];
+  let accepted = 0;
+  let skippedMissing = 0;
+  for (const r of results) {
+    const pFile = path.join(promptDir, `${promptPrefix}${r.seed}.txt`);
+    const oFile = path.join(outputDir, `${outputPrefix}${r.seed}.txt`);
+    if (!fs.existsSync(pFile) || !fs.existsSync(oFile)) {
+      skippedMissing++;
+      continue;
+    }
+    const rv = computeVerifiableReward(r);
+    if (rv.acceptedForRFT) accepted++;
+    if (rftOnly && !rv.acceptedForRFT) continue;
+    lines.push(JSON.stringify({
+      seed: r.seed,
+      isLongContext: Boolean(r.isLongContext),
+      prompt: fs.readFileSync(pFile, 'utf8'),
+      completion: fs.readFileSync(oFile, 'utf8'),
+      reward: rv.reward,
+      rewardBreakdown: rv.breakdown,
+      acceptedForRFT: rv.acceptedForRFT,
+      passedOps: r.passedOps,
+      totalOps: r.totalOps,
+      driftWarnings: r.driftWarnings || [],
+    }));
+  }
+  fs.mkdirSync(path.dirname(path.resolve(outFile)), { recursive: true });
+  fs.writeFileSync(outFile, lines.join('\n') + (lines.length ? '\n' : ''), 'utf8');
+  console.log(JSON.stringify({
+    exported: lines.length,
+    acceptedForRFT: accepted,
+    totalInputResults: results.length,
+    skippedMissing,
+    rftOnly,
+    outFile: path.resolve(outFile),
+  }, null, 2));
   process.exit(0);
 }
 

@@ -633,3 +633,36 @@ export function buildCompareReport(baselineResults, candidateResults, meta = {})
     markdown: lines.join('\n'),
   };
 }
+
+/**
+ * Compute a deterministic verifiable reward (RLVR / GRPO / RFT) from a graded evaluation record.
+ * Reward range: [-0.5, 1.0]. Zero LLM-as-a-judge variance.
+ *   - Parse failure: -0.5
+ *   - Valid format: +0.1
+ *   - Exact oracle operator hit ratio: +0.7 * (passedOps / totalOps)
+ *   - Zero untouched-domain drift: +0.2 (drift present: -0.3)
+ *   - Patch apply errors penalty: -min(0.2, patchErrors.length * 0.05)
+ */
+export function computeVerifiableReward(grade) {
+  if (!grade || !grade.parseOk) {
+    return {
+      reward: -0.5,
+      breakdown: { format: -0.5, accuracy: 0, drift: 0, patchPenalty: 0 },
+      acceptedForRFT: false,
+    };
+  }
+  const total = Math.max(1, Number(grade.totalOps || 0));
+  const passed = Math.max(0, Math.min(total, Number(grade.passedOps || 0)));
+  const format = 0.1;
+  const accuracy = Math.round((0.7 * (passed / total)) * 10000) / 10000;
+  const hasDrift = (grade.driftWarnings || []).length > 0;
+  const drift = hasDrift ? -0.3 : 0.2;
+  const patchPenalty = -Math.min(0.2, (grade.patchErrors || []).length * 0.05);
+  const reward = Math.max(-0.5, Math.min(1.0, Math.round((format + accuracy + drift + patchPenalty) * 10000) / 10000));
+  const acceptedForRFT = Boolean(grade.allPassed && grade.parseOk && !hasDrift && (grade.patchErrors || []).length === 0);
+  return {
+    reward,
+    breakdown: { format, accuracy, drift, patchPenalty },
+    acceptedForRFT,
+  };
+}

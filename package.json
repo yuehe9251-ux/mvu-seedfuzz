@@ -1,6 +1,6 @@
 {
   "name": "mvu-seedfuzz",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Seed-driven reverse-oracle variable fuzzing & vulnerability heatmap framework for SillyTavern / MVU / AI RP character cards.",
   "type": "module",
   "main": "src/engine.mjs",

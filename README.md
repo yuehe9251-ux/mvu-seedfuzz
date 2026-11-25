@@ -127,6 +127,17 @@ node src/cli.mjs compare \
 ```
 自动检测并输出客观告警信号：`LONG_CONTEXT_TRUNCATION_SUSPECT`（疑似暗中截断长上下文）、`ACCURACY_DEGRADATION_SUSPECT`（同题命中率显著下降）、`FORMAT_INSTABILITY_SUSPECT`（JSON 语法崩溃率升高）、`CACHE_BYPASS_SUSPECT`（前缀缓存疑似未透传）或 `CONSISTENT_WITH_BASELINE`（与基线一致）。
 
+### 5. 导出 RLVR / GRPO / RFT 训练数据集（`export-rlvr`）
+这套「正结状态机 → 随机种子突变 → 自然语言反推 → 盲测做题 → 确定性代码裁判」同样是一座零人工标注的 **RLVR / 拒绝采样微调（RFT）合成数据工厂**。运行以下命令即可将压测轨迹导出为标准 JSONL（含连续可验证奖励 `reward ∈ [-0.5, 1.0]`，详见 [docs/RLVR_TRAINING.md](./docs/RLVR_TRAINING.md)）：
+
+```bash
+node src/cli.mjs export-rlvr \
+  --results-file ./runs/results.json \
+  --prompt-dir ./runs \
+  --out ./datasets/rft_train.jsonl \
+  --rft-only
+```
+
 ---
 
 ## 如何更换为你自己的变量框架

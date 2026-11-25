@@ -118,6 +118,17 @@ node src/cli.mjs compare \
 ```
 Automatically reports side-by-side Standard/Long-Context hit rates, JSON parse failure rates, avg/P95 latency, multi-provider prefix cache hit rates, divergent seeds, and objective diagnostic signals (`LONG_CONTEXT_TRUNCATION_SUSPECT`, `ACCURACY_DEGRADATION_SUSPECT`, `FORMAT_INSTABILITY_SUSPECT`, `CACHE_BYPASS_SUSPECT`, or `CONSISTENT_WITH_BASELINE`).
 
+### Exporting RLVR / GRPO / RFT Training Datasets (`export-rlvr`)
+Because every test case carries a deterministic code oracle, MVU-SeedFuzz doubles as a zero-annotation **RLVR / Rejection-Sampling Fine-Tuning (RFT)** data factory (see [docs/RLVR_TRAINING.md](./docs/RLVR_TRAINING.md)):
+
+```bash
+node src/cli.mjs export-rlvr \
+  --results-file ./runs/results.json \
+  --prompt-dir ./runs \
+  --out ./datasets/rft_train.jsonl \
+  --rft-only
+```
+
 ---
 
 ## Replacing with Your Own Variable Framework

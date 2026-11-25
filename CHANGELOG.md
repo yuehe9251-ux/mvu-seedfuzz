@@ -2,6 +2,12 @@
 
 All notable changes to **MVU-SeedFuzz** will be documented in this file.
 
+## [0.2.1] - 2026-11-26
+
+### Added
+- **Verifiable Reward & RLVR/RFT Dataset Export (`computeVerifiableReward`, `mvu-seedfuzz export-rlvr`)**: Converts graded blind-fuzz trajectories into standard JSONL training records (`prompt`, `completion`, continuous `reward ∈ [-0.5, 1.0]`, `rewardBreakdown`, `acceptedForRFT`) with optional `--rft-only` filtering for Rejection-Sampling SFT.
+- **Post-Training Architecture & Ecosystem Guide (`docs/RLVR_TRAINING.md`)**: Documents how to connect MVU-SeedFuzz's reverse-oracle verifier to upstream RLVR/GRPO trainers (`TRL GRPOTrainer`, `nano-rlvr`, `AReaL`) along with style-diversity and anti-reward-hacking guardrails.
+
 ## [0.2.0] - 2026-11-26
 
 ### Added
