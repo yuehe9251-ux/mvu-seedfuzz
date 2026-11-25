@@ -207,9 +207,14 @@ export function generateCase(preset, seed, options = {}) {
     : JSON.stringify(baseStatData, null, 2);
 
   const factsBullets = picked.map((p, i) => `${i + 1}. [${p.domain} · ${p.name}] ${p.storyFact}`).join('\n');
+  const wordGuide = picked.length <= 6
+    ? 'a natural, immersive 200-380 word RP story turn'
+    : (picked.length <= 15
+      ? 'a natural, immersive 450-800 word RP story turn (2-3 paragraphs)'
+      : `a complete, immersive 850-1500 word multi-paragraph RP climax turn (3-5 paragraphs) so all ${picked.length} mutations, exact numbers, and names fit naturally`);
   const storyPrompt = [
     `You are a strict reverse-oracle RP story writer for preset "${preset.name}" (SEED=${seed}).`,
-    `Write a natural, immersive 200-380 word RP story turn in the language of the facts below that embeds EVERY listed mutation cleanly.`,
+    `Write ${wordGuide} in the language of the facts below that embeds EVERY listed mutation cleanly.`,
     ``,
     `[HARD RULES — ANY VIOLATION INVALIDATES THE TEST]`,
     `1. Every single fact, exact number, item/skill/quest/NPC name, and duration in the list MUST appear naturally in the story prose.`,
